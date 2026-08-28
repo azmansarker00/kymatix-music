@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useRef, useEffect } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { MusicControls } from 'capacitor-music-controls-plugin';
+import { LocalNotifications } from '@capacitor/local-notifications';
 
 const PlayerContext = createContext();
 
@@ -40,6 +41,23 @@ export function PlayerProvider({ children }) {
   const saveState = (key, val) => {
     try { localStorage.setItem(key, typeof val === 'string' ? val : JSON.stringify(val)); } catch {}
   };
+
+  // Android 13+ Notification Permission Request (ব্যাকগ্রাউন্ড প্লেব্যাকের জন্য বাধ্যতামূলক)
+  useEffect(() => {
+    async function requestAndroidPermissions() {
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const permStatus = await LocalNotifications.checkPermissions();
+          if (permStatus.display !== 'granted') {
+            await LocalNotifications.requestPermissions();
+          }
+        } catch (e) {
+          console.log("Permission request error:", e);
+        }
+      }
+    }
+    requestAndroidPermissions();
+  }, []);
 
   // ১. অডিও ইঞ্জিন সেটআপ
   useEffect(() => {
@@ -113,7 +131,7 @@ export function PlayerProvider({ children }) {
         ticker: `Playing: ${currentTrack.title}`
       }).catch(err => console.error('MusicControls Error:', err));
     } else if (typeof window !== 'undefined' && 'mediaSession' in navigator) {
-      // ওয়েবের জন্য ফলব্যাক
+      // ওয়েবের জন্য ফলব্যাক
       navigator.mediaSession.metadata = new window.MediaMetadata({
         title: currentTrack.title,
         artist: currentTrack.artist,

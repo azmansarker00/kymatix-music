@@ -2,40 +2,39 @@ package com.kymatix.music;
 
 import android.os.Bundle;
 import android.webkit.WebSettings;
-import android.webkit.WebView;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        try {
-            WebView webView = this.getBridge().getWebView();
-            WebSettings settings = webView.getSettings();
-
-            // ব্যাকগ্রাউন্ডে অডিও ও স্ক্রিপ্ট থ্রেড সচল রাখার কনফিগারেশন
+        // ১. WebView-কে অডিও অটো-প্লে করার পূর্ণ পারমিশন দেওয়া
+        if (this.getBridge() != null && this.getBridge().getWebView() != null) {
+            WebSettings settings = this.getBridge().getWebView().getSettings();
             settings.setMediaPlaybackRequiresUserGesture(false);
-            settings.setJavaScriptEnabled(true);
-            settings.setDomStorageEnabled(true);
-            settings.setDatabaseEnabled(true);
-        } catch (Exception ignored) {}
+        }
     }
 
     @Override
     public void onPause() {
         super.onPause();
-        try {
-            // মিনিমাইজ বা লক হলেও টাইমার সচল রাখা
+        // ২. ক্যাপাসিটরের ডিফল্ট Pause সিস্টেমকে বাইপাস করা হচ্ছে (ম্যাজিক হ্যাক)
+        // অ্যাপ মিনিমাইজ হলেও অডিও ইঞ্জিন জোর করে চালু থাকবে!
+        if (this.getBridge() != null && this.getBridge().getWebView() != null) {
             this.getBridge().getWebView().resumeTimers();
-        } catch (Exception ignored) {}
+            this.getBridge().getWebView().onResume();
+        }
     }
 
     @Override
     public void onStop() {
         super.onStop();
-        try {
+        // ৩. স্ক্রিন লক হলেও WebView এবং অডিও ইঞ্জিন সচল থাকবে
+        if (this.getBridge() != null && this.getBridge().getWebView() != null) {
             this.getBridge().getWebView().resumeTimers();
-        } catch (Exception ignored) {}
+            this.getBridge().getWebView().onResume();
+        }
     }
 }
