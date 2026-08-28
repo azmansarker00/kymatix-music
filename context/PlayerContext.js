@@ -39,12 +39,11 @@ export function PlayerProvider({ children }) {
   const [activeTab, setActiveTab] = useState('home'); 
   const [selectedArtist, setSelectedArtist] = useState(null);
 
-  // Active Playback Context Info
   const [playbackContext, setPlaybackContext] = useState({ type: 'feed', sourceId: null, list: [] });
 
-  // Native HTML5 Audio Engine Ref
-  const audioRef = useRef(null);
-  const isInitialRestored = useRef(false);
+  const primaryPlayerRef = useRef(null);
+  const timerRef = useRef(null);
+  const keepAliveAudio = useRef(null);
 
   const saveState = (key, val) => {
     try { localStorage.setItem(key, typeof val === 'string' ? val : JSON.stringify(val)); } catch {}
@@ -64,25 +63,12 @@ export function PlayerProvider({ children }) {
     return loadedHistory.filter((item) => now - (item.playedAt || now) <= maxAge);
   };
 
-  // 1. Initial Load & Native Audio Event Listeners
+  // ১. সেশন লোড ও সাইলেন্ট অডিও সেটআপ (ব্যাকগ্রাউন্ড কিপ-অ্যালাইভ ইঞ্জিন)
   useEffect(() => {
     try {
       if (typeof window !== 'undefined') {
-        const audio = new Audio();
-        audio.preload = 'auto';
-
-        audio.ontimeupdate = () => {
-          setCurrentTime(audio.currentTime);
-          if (audio.duration && !isNaN(audio.duration)) {
-            setDuration(Math.round(audio.duration));
-          }
-        };
-
-        audio.onplay = () => setIsPlaying(true);
-        audio.onpause = () => setIsPlaying(false);
-        audio.onended = () => handleNext();
-
-        audioRef.current = audio;
+        keepAliveAudio.current = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA');
+        keepAliveAudio.current.loop = true;
       }
 
       const savedTheme = localStorage.getItem('kymatix_theme');
@@ -118,11 +104,7 @@ export function PlayerProvider({ children }) {
       if (savedRepeat) setRepeatMode(savedRepeat);
 
       const savedVolume = localStorage.getItem('kymatix_volume');
-      if (savedVolume !== null) {
-        const v = parseInt(savedVolume, 10);
-        setVolume(v);
-        if (audioRef.current) audioRef.current.volume = v / 100;
-      }
+      if (savedVolume !== null) setVolume(parseInt(savedVolume, 10));
 
       const savedQueue = localStorage.getItem('kymatix_user_queue');
       if (savedQueue) setUserQueue(JSON.parse(savedQueue));
@@ -134,57 +116,22 @@ export function PlayerProvider({ children }) {
         setCurrentTrack(parsedTrack);
         setDuration(parsedTrack.duration || 240);
         if (savedTime) {
-          const parsedTime = parseFloat(savedTime);
-          setCurrentTime(parsedTime);
+          setCurrentTime(parseFloat(savedTime));
         }
       }
-      isInitialRestored.current = true;
     } catch {}
   }, []);
 
-  // Save Playback Time Periodically
+  // ২. YouTube iFrame API লোডার
   useEffect(() => {
-    if (currentTime > 0 && currentTrack) {
-      saveState('kymatix_playback_time', currentTime);
+    if (typeof window !== 'undefined' && !window.YT) {
+      const tag = document.createElement('script');
+      tag.src = 'https://www.youtube.com/iframe_api';
+      document.body.appendChild(tag);
     }
-  }, [currentTime, currentTrack]);
+  }, []);
 
-  // 2. Dynamic Tab Title
-  useEffect(() => {
-    if (typeof document === 'undefined') return;
-    if (currentTrack && isPlaying) {
-      document.title = `▶ ${currentTrack.title} • ${currentTrack.artist} | KYMATIX STUDIO`;
-    } else if (currentTrack) {
-      document.title = `❚❚ ${currentTrack.title} • ${currentTrack.artist} | KYMATIX STUDIO`;
-    } else {
-      document.title = 'KYMATIX STUDIO';
-    }
-  }, [currentTrack, isPlaying]);
-
-  const toggleTheme = (newTheme) => {
-    setTheme(newTheme);
-    saveState('kymatix_theme', newTheme);
-  };
-
-  const toggleLayout = (newLayout) => {
-    setViewLayout(newLayout);
-    saveState('kymatix_layout', newLayout);
-  };
-
-  const changeHistoryRetention = (period) => {
-    setHistoryRetention(period);
-    saveState('kymatix_history_retention', period);
-    const cleaned = cleanExpiredHistory(history, period);
-    setHistory(cleaned);
-    saveState('kymatix_history', cleaned);
-  };
-
-  const clearHistoryNow = () => {
-    setHistory([]);
-    saveState('kymatix_history', []);
-  };
-
-  // 3. Android System Notification & Lockscreen MediaSession Controller
+  // ৩. সিস্টেম নোটিফিকেশন বার ও লকস্ক্রিন কন্ট্রোল (MediaSession API)
   useEffect(() => {
     if (!currentTrack || typeof window === 'undefined' || !('mediaSession' in navigator)) return;
 
@@ -194,9 +141,6 @@ export function PlayerProvider({ children }) {
         artist: currentTrack.artist || 'KYMATIX Studio',
         album: currentTrack.album || 'KYMATIX Stream',
         artwork: [
-          { src: currentTrack.thumbnail || currentTrack.cover || '', sizes: '96x96', type: 'image/jpeg' },
-          { src: currentTrack.thumbnail || currentTrack.cover || '', sizes: '128x128', type: 'image/jpeg' },
-          { src: currentTrack.thumbnail || currentTrack.cover || '', sizes: '256x256', type: 'image/jpeg' },
           { src: currentTrack.thumbnail || currentTrack.cover || '', sizes: '512x512', type: 'image/jpeg' },
         ]
       });
@@ -224,6 +168,18 @@ export function PlayerProvider({ children }) {
       navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
     }
   }, [isPlaying]);
+
+  // ৪. ডাইনামিক ট্যাব টাইটেল
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    if (currentTrack && isPlaying) {
+      document.title = `▶ ${currentTrack.title} • ${currentTrack.artist} | KYMATIX STUDIO`;
+    } else if (currentTrack) {
+      document.title = `❚❚ ${currentTrack.title} • ${currentTrack.artist} | KYMATIX STUDIO`;
+    } else {
+      document.title = 'KYMATIX STUDIO';
+    }
+  }, [currentTrack, isPlaying]);
 
   const populateAutoQueue = async (seedTrack, context = {}) => {
     try {
@@ -275,9 +231,14 @@ export function PlayerProvider({ children }) {
     } catch {}
   };
 
-  // 4. Pure Audio Play Engine (No Video / Low Data Usage)
-  const playTrack = async (track, context = {}) => {
+  // ৫. নিশ্চিত প্লেব্যাক ইঞ্জিন (YouTube Engine + Audio Anchor)
+  const playTrack = (track, context = {}) => {
     if (!track?.videoId) return;
+
+    // ব্যাকগ্রাউন্ড লক অন রাখতে সাইলেন্ট অডিও প্লে
+    if (keepAliveAudio.current) {
+      keepAliveAudio.current.play().catch(() => {});
+    }
 
     setCurrentTrack(track);
     setIsPlaying(true);
@@ -303,30 +264,62 @@ export function PlayerProvider({ children }) {
 
     populateAutoQueue(track, context);
 
+    // লিরিক্স
     setLyrics('');
     fetch(`/api/lyrics?title=${encodeURIComponent(track.title)}&artist=${encodeURIComponent(track.artist)}&videoId=${track.videoId}`)
       .then((res) => res.json())
       .then((data) => setLyrics(data.lyrics || 'No synchronized lyrics available.'))
       .catch(() => setLyrics(''));
 
-    try {
-      const res = await fetch(`/api/stream?videoId=${track.videoId}`);
-      const data = await res.json();
-
-      if (data.streamUrl && audioRef.current) {
-        audioRef.current.src = data.streamUrl;
-        audioRef.current.volume = isMuted ? 0 : volume / 100;
-        await audioRef.current.play();
+    const initOrLoadPlayer = () => {
+      if (!primaryPlayerRef.current && window.YT && window.YT.Player) {
+        primaryPlayerRef.current = new window.YT.Player('kymatix-primary-engine', {
+          height: '100',
+          width: '100',
+          videoId: track.videoId,
+          playerVars: {
+            autoplay: 1,
+            controls: 0,
+            playsinline: 1,
+            rel: 0,
+            enablejsapi: 1,
+            origin: typeof window !== 'undefined' ? window.location.origin : ''
+          },
+          events: {
+            onReady: (e) => {
+              e.target.setVolume(isMuted ? 0 : volume);
+              e.target.playVideo();
+            },
+            onStateChange: (e) => {
+              if (e.data === window.YT.PlayerState.PLAYING) {
+                setIsPlaying(true);
+                const realDur = e.target.getDuration();
+                if (realDur) setDuration(Math.round(realDur));
+              } else if (e.data === window.YT.PlayerState.PAUSED) {
+                setIsPlaying(false);
+              } else if (e.data === window.YT.PlayerState.ENDED) {
+                handleNext();
+              }
+            },
+          },
+        });
+      } else if (primaryPlayerRef.current?.loadVideoById) {
+        primaryPlayerRef.current.loadVideoById(track.videoId);
+        primaryPlayerRef.current.setVolume(isMuted ? 0 : volume);
+        primaryPlayerRef.current.playVideo();
       }
-    } catch (e) {
-      console.error('Audio Stream Load Error:', e);
+    };
+
+    if (window.YT && window.YT.Player) {
+      initOrLoadPlayer();
+    } else {
+      setTimeout(initOrLoadPlayer, 500);
     }
   };
 
   const handleNext = () => {
     if (repeatMode === 'one') {
       seek(0);
-      audioRef.current?.play();
       return;
     }
     if (userQueue.length > 0) {
@@ -357,19 +350,24 @@ export function PlayerProvider({ children }) {
   };
 
   const togglePlay = () => {
-    if (!audioRef.current) return;
+    if (!primaryPlayerRef.current) {
+      if (currentTrack) playTrack(currentTrack);
+      return;
+    }
     if (isPlaying) {
-      audioRef.current.pause();
+      if (keepAliveAudio.current) keepAliveAudio.current.pause();
+      primaryPlayerRef.current.pauseVideo();
       setIsPlaying(false);
     } else {
-      audioRef.current.play().catch(() => {});
+      if (keepAliveAudio.current) keepAliveAudio.current.play().catch(() => {});
+      primaryPlayerRef.current.playVideo();
       setIsPlaying(true);
     }
   };
 
   const seek = (time) => {
-    if (!audioRef.current) return;
-    audioRef.current.currentTime = time;
+    if (!primaryPlayerRef.current?.seekTo) return;
+    primaryPlayerRef.current.seekTo(time, true);
     setCurrentTime(time);
     saveState('kymatix_playback_time', time);
   };
@@ -379,8 +377,8 @@ export function PlayerProvider({ children }) {
     setVolume(v);
     setIsMuted(v === 0);
     saveState('kymatix_volume', v);
-    if (audioRef.current) {
-      audioRef.current.volume = v / 100;
+    if (primaryPlayerRef.current?.setVolume) {
+      primaryPlayerRef.current.setVolume(v);
     }
   };
 
@@ -390,7 +388,7 @@ export function PlayerProvider({ children }) {
       changeVolume(volume || 50);
     } else {
       setIsMuted(true);
-      if (audioRef.current) audioRef.current.volume = 0;
+      if (primaryPlayerRef.current) primaryPlayerRef.current.setVolume(0);
     }
   };
 
@@ -459,6 +457,21 @@ export function PlayerProvider({ children }) {
     saveState('kymatix_playlists', updated);
   };
 
+  // প্রোগ্রেস বার টাইমার
+  useEffect(() => {
+    if (isPlaying) {
+      timerRef.current = setInterval(() => {
+        if (primaryPlayerRef.current?.getCurrentTime) {
+          const t = primaryPlayerRef.current.getCurrentTime();
+          if (t >= 0) setCurrentTime(t);
+        }
+      }, 250);
+    } else {
+      clearInterval(timerRef.current);
+    }
+    return () => clearInterval(timerRef.current);
+  }, [isPlaying]);
+
   return (
     <PlayerContext.Provider
       value={{
@@ -526,14 +539,27 @@ export function PlayerProvider({ children }) {
         addToQueue,
         removeFromUserQueue,
         clearUserQueue,
-        changeHistoryRetention,
-        clearHistoryNow,
+        changeHistoryRetention: (period) => {
+          setHistoryRetention(period);
+          saveState('kymatix_history_retention', period);
+          const cleaned = cleanExpiredHistory(history, period);
+          setHistory(cleaned);
+          saveState('kymatix_history', cleaned);
+        },
+        clearHistoryNow: () => {
+          setHistory([]);
+          saveState('kymatix_history', []);
+        },
         toggleLike,
         toggleFollowArtist,
         createPlaylist,
         addToPlaylist,
       }}
     >
+      {/* হিডেন ইঞ্জিন এলিমেন্ট */}
+      <div className="fixed -bottom-[500px] -right-[500px] pointer-events-none opacity-0">
+        <div id="kymatix-primary-engine" />
+      </div>
       {children}
     </PlayerContext.Provider>
   );
