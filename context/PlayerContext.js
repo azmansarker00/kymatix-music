@@ -35,12 +35,13 @@ export function PlayerProvider({ children }) {
   const [playbackContext, setPlaybackContext] = useState({ type: 'feed', sourceId: null, list: [] });
 
   const audioRef = useRef(null);
+  const keepAliveAudio = useRef(null); // ব্যাকগ্রাউন্ড প্রসেস বাঁচিয়ে রাখার সাইলেন্ট অডিও অ্যাঙ্কর
 
   const saveState = (key, val) => {
     try { localStorage.setItem(key, typeof val === 'string' ? val : JSON.stringify(val)); } catch {}
   };
 
-  // ১. নেটিভ অডিও ইঞ্জিন ইনিশিয়ালাইজেশন
+  // ১. নেটিভ অডিও ইঞ্জিন এবং ব্যাকগ্রাউন্ড কিপ-অ্যালাইভ ইনিশিয়ালাইজেশন
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const audio = new Audio();
@@ -58,6 +59,10 @@ export function PlayerProvider({ children }) {
       audio.onended = () => handleNext();
       
       audioRef.current = audio;
+
+      // ব্যাকগ্রাউন্ডে অ্যান্ড্রয়েড যাতে প্রসেস কিল না করে তার জন্য সাইলেন্ট অডিও লুপ সেটআপ
+      keepAliveAudio.current = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA');
+      keepAliveAudio.current.loop = true;
 
       if ('Notification' in window && Notification.permission === 'default') {
         Notification.requestPermission().catch(() => {});
@@ -113,30 +118,27 @@ export function PlayerProvider({ children }) {
     }
   }, [isPlaying]);
 
+  // ৩. লোকাল এপিআই রাউট থেকে স্ট্রিম ফেচ করার সঠিক ফাংশন
   const fetchAudioDirectUrl = async (videoId) => {
-    const pipedInstances = [
-      'https://pipedapi.kavin.rocks',
-      'https://api.piped.privacydev.net',
-      'https://piped-api.lunar.icu'
-    ];
-
-    for (const base of pipedInstances) {
-      try {
-        const res = await fetch(`${base}/streams/${videoId}`, { cache: 'no-store' });
-        if (!res.ok) continue;
-        const data = await res.json();
-        const audioStreams = data.audioStreams || [];
-        const best = audioStreams.find(s => s.itag === 140 || s.quality === '128 kbps')
-                  || audioStreams.find(s => s.mimeType?.includes('audio'))
-                  || audioStreams[0];
-        if (best?.url) return best.url;
-      } catch {}
+    try {
+      const res = await fetch(`/api/stream?videoId=${videoId}`);
+      const data = await res.json();
+      if (data.success && data.streamUrl) {
+        return data.streamUrl;
+      }
+    } catch (e) {
+      console.error("Local API Stream fetch error:", e);
     }
     return `https://invidious.snopyta.org/latest_version?id=${videoId}&itag=140`;
   };
 
   const playTrack = async (track, context = {}) => {
     if (!track?.videoId) return;
+
+    // ব্যাকগ্রাউন্ড প্রসেস ফোরগ্রাউন্ডে রাখার জন্য সাইলেন্ট অডিও প্লে করা
+    if (keepAliveAudio.current) {
+      keepAliveAudio.current.play().catch(() => {});
+    }
 
     setCurrentTrack(track);
     setIsPlaying(true);
@@ -183,9 +185,11 @@ export function PlayerProvider({ children }) {
   const togglePlay = () => {
     if (!audioRef.current) return;
     if (isPlaying) {
+      if (keepAliveAudio.current) keepAliveAudio.current.pause();
       audioRef.current.pause();
       setIsPlaying(false);
     } else {
+      if (keepAliveAudio.current) keepAliveAudio.current.play().catch(() => {});
       audioRef.current.play().catch(() => {});
       setIsPlaying(true);
     }

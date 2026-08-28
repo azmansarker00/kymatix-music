@@ -16,7 +16,6 @@ export async function GET(request) {
       return NextResponse.json({ error: 'Missing video ID' }, { status: 400 });
     }
 
-    // পিউর অডিও স্ট্রিম ফেচ করার জন্য নির্ভরযোগ্য Piped ক্লাস্টার
     const pipedInstances = [
       'https://pipedapi.kavin.rocks',
       'https://api.piped.privacydev.net',
@@ -44,7 +43,6 @@ export async function GET(request) {
         const data = await res.json();
         const audioStreams = data.audioStreams || [];
 
-        // ডাটা সাশ্রয়ী সেরা অডিও (m4a / 128kbps / 64kbps) বাছাই
         const bestAudio = audioStreams.find((s) => s.itag === 140 || s.quality === '128 kbps')
                        || audioStreams.find((s) => s.mimeType?.includes('audio/mp4') || s.mimeType?.includes('audio/webm'))
                        || audioStreams[0];
@@ -59,7 +57,6 @@ export async function GET(request) {
       }
     }
 
-    // ফলব্যাক সরাসরি অডিও
     if (!audioStreamUrl) {
       audioStreamUrl = `https://invidious.snopyta.org/latest_version?id=${videoId}&itag=140`;
     }
