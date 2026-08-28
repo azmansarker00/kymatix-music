@@ -6,11 +6,6 @@ export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
     const videoId = searchParams.get('id') || searchParams.get('videoId');
-    const directUrl = searchParams.get('url');
-
-    if (directUrl) {
-      return NextResponse.redirect(directUrl, { status: 307 });
-    }
 
     if (!videoId) {
       return NextResponse.json({ error: 'Missing video ID' }, { status: 400 });
@@ -24,7 +19,6 @@ export async function GET(request) {
     ];
 
     let audioStreamUrl = null;
-    let quality = '128 kbps';
 
     for (const instance of pipedInstances) {
       try {
@@ -42,14 +36,12 @@ export async function GET(request) {
 
         const data = await res.json();
         const audioStreams = data.audioStreams || [];
-
         const bestAudio = audioStreams.find((s) => s.itag === 140 || s.quality === '128 kbps')
-                       || audioStreams.find((s) => s.mimeType?.includes('audio/mp4') || s.mimeType?.includes('audio/webm'))
+                       || audioStreams.find((s) => s.mimeType?.includes('audio'))
                        || audioStreams[0];
 
         if (bestAudio?.url) {
           audioStreamUrl = bestAudio.url;
-          quality = bestAudio.quality || '128 kbps';
           break;
         }
       } catch (err) {
@@ -61,15 +53,8 @@ export async function GET(request) {
       audioStreamUrl = `https://invidious.snopyta.org/latest_version?id=${videoId}&itag=140`;
     }
 
-    return NextResponse.json({
-      success: true,
-      streamUrl: audioStreamUrl,
-      quality: quality,
-      format: 'audio-only',
-      id: videoId
-    });
-
+    return NextResponse.json({ success: true, streamUrl: audioStreamUrl });
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to resolve audio stream' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to resolve stream' }, { status: 500 });
   }
 }
