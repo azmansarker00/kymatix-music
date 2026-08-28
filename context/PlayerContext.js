@@ -2,8 +2,6 @@
 
 import React, { createContext, useContext, useState, useRef, useEffect } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { MusicControls } from 'capacitor-music-controls-plugin';
-import { LocalNotifications } from '@capacitor/local-notifications';
 
 const PlayerContext = createContext();
 
@@ -42,24 +40,7 @@ export function PlayerProvider({ children }) {
     try { localStorage.setItem(key, typeof val === 'string' ? val : JSON.stringify(val)); } catch {}
   };
 
-  // Android 13+ Notification Permission Request (ব্যাকগ্রাউন্ড প্লেব্যাকের জন্য বাধ্যতামূলক)
-  useEffect(() => {
-    async function requestAndroidPermissions() {
-      if (Capacitor.isNativePlatform()) {
-        try {
-          const permStatus = await LocalNotifications.checkPermissions();
-          if (permStatus.display !== 'granted') {
-            await LocalNotifications.requestPermissions();
-          }
-        } catch (e) {
-          console.log("Permission request error:", e);
-        }
-      }
-    }
-    requestAndroidPermissions();
-  }, []);
-
-  // ১. অডিও ইঞ্জিন সেটআপ
+  // ১. নেটিভ অডিও ইঞ্জিন ইনিশিয়ালাইজেশন
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const audio = new Audio();
@@ -77,8 +58,12 @@ export function PlayerProvider({ children }) {
       audio.onended = () => handleNext();
       
       audioRef.current = audio;
+
+      if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission().catch(() => {});
+      }
     }
-    // Storage load logics...
+
     try {
       const savedQueue = localStorage.getItem('kymatix_user_queue');
       if (savedQueue) setUserQueue(JSON.parse(savedQueue));
@@ -93,61 +78,37 @@ export function PlayerProvider({ children }) {
     }
   }, [currentTime, currentTrack]);
 
-  // ডাইনামিক ফাংশন রেফারেন্স (নেটিভ ইভেন্ট লিসেনারের জন্য)
-  const controlsRef = useRef({ togglePlay: () => {}, handleNext: () => {}, handlePrevious: () => {} });
-  
-  // ২. নেটিভ ইভেন্ট লিসেনার (লকস্ক্রিন থেকে প্লে/পজ/নেক্সট রিসিভ করা)
+  // ২. অ্যান্ড্রয়েড লকস্ক্রিন এবং নোটিফিকেশন বার কন্ট্রোল (MediaSession API)
   useEffect(() => {
-    if (Capacitor.isNativePlatform()) {
-      const sub = MusicControls.addListener('controlsNotification', (info) => {
-        const action = info.message;
-        if (action === 'music-controls-play' || action === 'music-controls-pause' || action === 'music-controls-toggle-play-pause') {
-          controlsRef.current.togglePlay();
-        } else if (action === 'music-controls-next') {
-          controlsRef.current.handleNext();
-        } else if (action === 'music-controls-previous') {
-          controlsRef.current.handlePrevious();
-        }
-      });
-      return () => { if (sub && sub.remove) sub.remove(); };
-    }
-  }, []);
+    if (!currentTrack || typeof window === 'undefined' || !('mediaSession' in navigator)) return;
 
-  // ৩. নেটিভ ফোরগ্রাউন্ড সার্ভিস ও লকস্ক্রিন নোটিফিকেশন আপডেট
-  useEffect(() => {
-    if (!currentTrack) return;
-
-    if (Capacitor.isNativePlatform()) {
-      MusicControls.create({
-        track: currentTrack.title || 'Unknown Track',
-        artist: currentTrack.artist || 'KYMATIX Studio',
-        cover: currentTrack.thumbnail || '',
-        isPlaying: isPlaying,
-        dismissable: false, // গান চললে নোটিফিকেশন সোয়াইপ করে কাটা যাবে না
-        hasPrev: true,
-        hasNext: true,
-        hasClose: false,
-        album: 'KYMATIX App',
-        ticker: `Playing: ${currentTrack.title}`
-      }).catch(err => console.error('MusicControls Error:', err));
-    } else if (typeof window !== 'undefined' && 'mediaSession' in navigator) {
-      // ওয়েবের জন্য ফলব্যাক
+    try {
       navigator.mediaSession.metadata = new window.MediaMetadata({
-        title: currentTrack.title,
-        artist: currentTrack.artist,
-        artwork: [{ src: currentTrack.thumbnail, sizes: '512x512', type: 'image/jpeg' }]
+        title: currentTrack.title || 'KYMATIX Track',
+        artist: currentTrack.artist || 'KYMATIX Studio',
+        album: 'KYMATIX Studio Stream',
+        artwork: [
+          { src: currentTrack.thumbnail || '', sizes: '96x96', type: 'image/jpeg' },
+          { src: currentTrack.thumbnail || '', sizes: '128x128', type: 'image/jpeg' },
+          { src: currentTrack.thumbnail || '', sizes: '256x256', type: 'image/jpeg' },
+          { src: currentTrack.thumbnail || '', sizes: '512x512', type: 'image/jpeg' },
+        ]
       });
+
       navigator.mediaSession.setActionHandler('play', () => togglePlay());
       navigator.mediaSession.setActionHandler('pause', () => togglePlay());
       navigator.mediaSession.setActionHandler('nexttrack', () => handleNext());
       navigator.mediaSession.setActionHandler('previoustrack', () => handlePrevious());
+      navigator.mediaSession.setActionHandler('seekto', (details) => {
+        if (details.seekTime !== undefined) seek(details.seekTime);
+      });
+    } catch (e) {
+      console.error("MediaSession error:", e);
     }
   }, [currentTrack]);
 
   useEffect(() => {
-    if (Capacitor.isNativePlatform()) {
-      MusicControls.updateIsPlaying({ isPlaying }).catch(() => {});
-    } else if (typeof window !== 'undefined' && 'mediaSession' in navigator) {
+    if (typeof window !== 'undefined' && 'mediaSession' in navigator) {
       navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
     }
   }, [isPlaying]);
@@ -193,14 +154,16 @@ export function PlayerProvider({ children }) {
         audioRef.current.play().catch(err => console.error("Play error:", err));
       }
     } catch (e) {
-      console.error("Failed to load pure audio stream:", e);
+      console.error("Failed to load audio stream:", e);
     }
   };
 
   const handleNext = () => {
     if (repeatMode === 'one') {
-      audioRef.current.currentTime = 0;
-      audioRef.current?.play();
+      if (audioRef.current) {
+        audioRef.current.currentTime = 0;
+        audioRef.current.play();
+      }
       return;
     }
     if (userQueue.length > 0) {
@@ -227,11 +190,6 @@ export function PlayerProvider({ children }) {
       setIsPlaying(true);
     }
   };
-
-  // আপডেট রেফারেন্স
-  useEffect(() => {
-    controlsRef.current = { togglePlay, handleNext, handlePrevious };
-  }, [togglePlay, handleNext, handlePrevious]);
 
   const seek = (time) => {
     if (audioRef.current) audioRef.current.currentTime = time;
