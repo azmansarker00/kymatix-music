@@ -4,9 +4,18 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
-  const url = searchParams.get('url');
+  const videoId = searchParams.get('id') || searchParams.get('videoId');
+  const directUrl = searchParams.get('url');
 
-  if (!url) return new NextResponse('Missing URL', { status: 400 });
+  if (directUrl) {
+    return NextResponse.redirect(directUrl, { status: 307 });
+  }
 
-  return NextResponse.redirect(url, { status: 307 });
+  if (!videoId) {
+    return new NextResponse('Missing video ID or URL', { status: 400 });
+  }
+
+  // Audio stream resolver endpoint redirecting directly to audio source
+  const fallbackAudio = `https://www.youtube.com/watch?v=${videoId}`;
+  return NextResponse.json({ streamUrl: fallbackAudio, id: videoId });
 }

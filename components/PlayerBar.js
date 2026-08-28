@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { usePlayer } from '@/context/PlayerContext';
 import LyricsView from './LyricsView';
 import QueueDrawer from './QueueDrawer';
 import SettingsModal from './SettingsModal';
+import DeviceConnectModal from './DeviceConnectModal';
 import WaveformScrubber from './WaveformScrubber';
 import { 
   Play, 
@@ -53,10 +54,11 @@ export default function PlayerBar() {
     setSelectedArtist
   } = usePlayer() || {};
 
+  const [isConnectOpen, setIsConnectOpen] = useState(false);
+
   // Keyboard Shortcuts Handler (Space, Right Arrow, Left Arrow)
   useEffect(() => {
     const handleKeyDown = (e) => {
-      // যদি ইউজার ইনপুট ফিল্ড বা টেক্সটবক্সে টাইপ করেন তবে শর্টকাট কাজ করবে না
       if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
 
       if (e.code === 'Space') {
@@ -191,8 +193,9 @@ export default function PlayerBar() {
             </button>
 
             <button
-              className="hover:text-white transition p-1"
-              title="Cast"
+              onClick={() => setIsConnectOpen(true)}
+              className="hover:text-[#00F2FE] transition p-1"
+              title="Spotify Connect (Cross-Device)"
             >
               <Cast size={16} />
             </button>
@@ -218,6 +221,7 @@ export default function PlayerBar() {
       <LyricsView />
       <QueueDrawer />
       <SettingsModal />
+      <DeviceConnectModal isOpen={isConnectOpen} onClose={() => setIsConnectOpen(false)} />
     </>
   );
 }

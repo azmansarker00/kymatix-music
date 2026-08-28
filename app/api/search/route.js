@@ -6,13 +6,20 @@ async function getQuickVideoId(term) {
   try {
     const res = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(term)}`, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
       },
       cache: 'no-store'
     });
     const html = await res.text();
-    const match = html.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
-    return match ? match[1] : '';
+    
+    // Multi-pattern fallback regex matching for maximum reliability
+    const idMatch = html.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
+    if (idMatch && idMatch[1]) return idMatch[1];
+
+    const compactMatch = html.match(/\/watch\?v=([a-zA-Z0-9_-]{11})/);
+    if (compactMatch && compactMatch[1]) return compactMatch[1];
+
+    return '';
   } catch {
     return '';
   }
@@ -41,11 +48,11 @@ export async function GET(request) {
       results.map(async (s, index) => {
         const cleanTitle = (s.trackName || '').replace(/[\(\[].*?[\)\]]/g, '').trim();
         const cleanArtist = (s.artistName || '').trim();
-        const vId = await getQuickVideoId(`${cleanTitle} ${cleanArtist} official audio`);
+        const vId = await getQuickVideoId(`${cleanTitle} ${cleanArtist} audio`);
 
         return {
           id: String(s.trackId),
-          videoId: vId || 'dQw4w9WgXcQ', // Fallback stream id if unavailable
+          videoId: vId || 'dQw4w9WgXcQ',
           title: s.trackName || 'Track',
           artist: s.artistName || 'Unknown Artist',
           album: s.collectionName || 'Single Release',

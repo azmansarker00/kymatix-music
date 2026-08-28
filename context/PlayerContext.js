@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useRef, useEffect } from 'react';
+import React, { createContext, useContext, useState, useRef, useEffect, useCallback } from 'react';
 
 const PlayerContext = createContext();
 
@@ -43,9 +43,8 @@ export function PlayerProvider({ children }) {
   const [playbackContext, setPlaybackContext] = useState({ type: 'feed', sourceId: null, list: [] });
 
   const primaryPlayerRef = useRef(null);
-  const preloadPlayerRef = useRef(null);
   const timerRef = useRef(null);
-  const preloadedVideoId = useRef(null);
+  const isInitialRestored = useRef(false);
 
   const saveState = (key, val) => {
     try { localStorage.setItem(key, typeof val === 'string' ? val : JSON.stringify(val)); } catch {}
@@ -65,6 +64,7 @@ export function PlayerProvider({ children }) {
     return loadedHistory.filter((item) => now - (item.playedAt || now) <= maxAge);
   };
 
+  // 1. Restore Persistent Session on Initial Load (Spotify Style)
   useEffect(() => {
     try {
       const savedTheme = localStorage.getItem('kymatix_theme');
@@ -92,8 +92,64 @@ export function PlayerProvider({ children }) {
 
       const savedPlaylists = localStorage.getItem('kymatix_playlists');
       if (savedPlaylists) setPlaylists(JSON.parse(savedPlaylists));
+
+      const savedShuffle = localStorage.getItem('kymatix_shuffle');
+      if (savedShuffle !== null) setIsShuffle(savedShuffle === 'true');
+
+      const savedRepeat = localStorage.getItem('kymatix_repeat');
+      if (savedRepeat) setRepeatMode(savedRepeat);
+
+      const savedVolume = localStorage.getItem('kymatix_volume');
+      if (savedVolume !== null) setVolume(parseInt(savedVolume, 10));
+
+      const savedQueue = localStorage.getItem('kymatix_user_queue');
+      if (savedQueue) setUserQueue(JSON.parse(savedQueue));
+
+      // Restore Last Played Track and Timestamp
+      const savedTrack = localStorage.getItem('kymatix_last_track');
+      const savedTime = localStorage.getItem('kymatix_playback_time');
+      if (savedTrack) {
+        const parsedTrack = JSON.parse(savedTrack);
+        setCurrentTrack(parsedTrack);
+        setDuration(parsedTrack.duration || 240);
+        if (savedTime) {
+          const parsedTime = parseFloat(savedTime);
+          setCurrentTime(parsedTime);
+        }
+      }
+      isInitialRestored.current = true;
     } catch {}
   }, []);
+
+  // Save Playback Time State Periodically
+  useEffect(() => {
+    if (currentTime > 0 && currentTrack) {
+      saveState('kymatix_playback_time', currentTime);
+    }
+  }, [currentTime, currentTrack]);
+
+  // 2. Dynamic Tab Title Update Engine (Track • Artist | KYMATIX STUDIO)
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    if (currentTrack && isPlaying) {
+      document.title = `▶ ${currentTrack.title} • ${currentTrack.artist} | KYMATIX STUDIO`;
+    } else if (currentTrack) {
+      document.title = `❚❚ ${currentTrack.title} • ${currentTrack.artist} | KYMATIX STUDIO`;
+    } else {
+      document.title = 'KYMATIX STUDIO';
+    }
+  }, [currentTrack, isPlaying]);
+
+  // Save Settings State
+  const toggleTheme = (newTheme) => {
+    setTheme(newTheme);
+    saveState('kymatix_theme', newTheme);
+  };
+
+  const toggleLayout = (newLayout) => {
+    setViewLayout(newLayout);
+    saveState('kymatix_layout', newLayout);
+  };
 
   const changeHistoryRetention = (period) => {
     setHistoryRetention(period);
@@ -108,16 +164,48 @@ export function PlayerProvider({ children }) {
     saveState('kymatix_history', []);
   };
 
-  const toggleTheme = (newTheme) => {
-    setTheme(newTheme);
-    saveState('kymatix_theme', newTheme);
-  };
+  // 3. Background Playback & MediaSession API (Lockscreen/Notification Media Controls)
+  useEffect(() => {
+    if (!currentTrack || typeof window === 'undefined' || !('mediaSession' in navigator)) return;
 
-  const toggleLayout = (newLayout) => {
-    setViewLayout(newLayout);
-    saveState('kymatix_layout', newLayout);
-  };
+    try {
+      navigator.mediaSession.metadata = new window.MediaMetadata({
+        title: currentTrack.title || 'KYMATIX Track',
+        artist: currentTrack.artist || 'KYMATIX Studio',
+        album: currentTrack.album || 'KYMATIX Stream',
+        artwork: [
+          { src: currentTrack.thumbnail || currentTrack.cover || '', sizes: '96x96', type: 'image/jpeg' },
+          { src: currentTrack.thumbnail || currentTrack.cover || '', sizes: '128x128', type: 'image/jpeg' },
+          { src: currentTrack.thumbnail || currentTrack.cover || '', sizes: '256x256', type: 'image/jpeg' },
+          { src: currentTrack.thumbnail || currentTrack.cover || '', sizes: '512x512', type: 'image/jpeg' },
+        ]
+      });
 
+      navigator.mediaSession.setActionHandler('play', () => togglePlay());
+      navigator.mediaSession.setActionHandler('pause', () => togglePlay());
+      navigator.mediaSession.setActionHandler('previoustrack', () => handlePrevious());
+      navigator.mediaSession.setActionHandler('nexttrack', () => handleNext());
+      navigator.mediaSession.setActionHandler('seekto', (details) => {
+        if (details.seekTime !== undefined) seek(details.seekTime);
+      });
+      navigator.mediaSession.setActionHandler('seekbackward', (details) => {
+        const skip = details.seekOffset || 10;
+        seek(Math.max(currentTime - skip, 0));
+      });
+      navigator.mediaSession.setActionHandler('seekforward', (details) => {
+        const skip = details.seekOffset || 10;
+        seek(Math.min(currentTime + skip, duration || 240));
+      });
+    } catch {}
+  }, [currentTrack, duration, currentTime]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+    }
+  }, [isPlaying]);
+
+  // 4. YouTube Hidden Engine Loader for Audio Pipeline
   useEffect(() => {
     if (!window.YT) {
       const tag = document.createElement('script');
@@ -126,51 +214,22 @@ export function PlayerProvider({ children }) {
     }
   }, []);
 
-  const preloadNextCandidate = (track) => {
-    if (!track?.videoId || preloadedVideoId.current === track.videoId) return;
-    preloadedVideoId.current = track.videoId;
-
-    if (!preloadPlayerRef.current && window.YT && window.YT.Player) {
-      preloadPlayerRef.current = new window.YT.Player('kymatix-preload-engine', {
-        height: '50',
-        width: '50',
-        videoId: track.videoId,
-        playerVars: { autoplay: 0, controls: 0, playsinline: 1 },
-        events: {
-          onReady: (e) => {
-            e.target.cueVideoById(track.videoId);
-            e.target.setVolume(0);
-          }
-        }
-      });
-    } else if (preloadPlayerRef.current?.cueVideoById) {
-      preloadPlayerRef.current.cueVideoById(track.videoId);
-      preloadPlayerRef.current.setVolume(0);
-    }
-  };
-
-  // Dedicated Queue Builder based on Context (Playlist vs Artist vs Feed)
   const populateAutoQueue = async (seedTrack, context = {}) => {
     try {
-      // 1. PLAYLIST CONTEXT: Strictly use playlist tracks
       if (context.isPlaylist && Array.isArray(context.trackList)) {
         const currentIndex = context.trackList.findIndex((t) => t.id === seedTrack.id);
         const remaining = currentIndex !== -1 ? context.trackList.slice(currentIndex + 1) : context.trackList.filter(t => t.id !== seedTrack.id);
         setAutoQueue(remaining);
-        if (remaining.length > 0) preloadNextCandidate(remaining[0]);
         return;
       }
 
-      // 2. ARTIST PAGE CONTEXT: Strictly use artist tracks
       if (context.isArtistPage && Array.isArray(context.trackList)) {
         const currentIndex = context.trackList.findIndex((t) => t.id === seedTrack.id);
         const remaining = currentIndex !== -1 ? context.trackList.slice(currentIndex + 1) : context.trackList.filter(t => t.id !== seedTrack.id);
         setAutoQueue(remaining.slice(0, 15));
-        if (remaining.length > 0) preloadNextCandidate(remaining[0]);
         return;
       }
 
-      // 3. MAIN FEED & SEARCH CONTEXT: Hybrid Radio Mix
       let combinedQueue = [];
       if (Array.isArray(context.trackList) && context.trackList.length > 1) {
         const currentIndex = context.trackList.findIndex((t) => t.id === seedTrack.id);
@@ -188,20 +247,12 @@ export function PlayerProvider({ children }) {
         combinedQueue = [...combinedQueue, ...newTracks];
       }
 
-      const final10 = combinedQueue.slice(0, 10);
-      setAutoQueue(final10);
-
-      if (userQueue.length > 0) {
-        preloadNextCandidate(userQueue[0]);
-      } else if (final10.length > 0) {
-        preloadNextCandidate(final10[0]);
-      }
+      setAutoQueue(combinedQueue.slice(0, 10));
     } catch {}
   };
 
-  // Fetch more tracks when reaching the bottom of the Queue Drawer
   const fetchMoreQueueTracks = async () => {
-    if (playbackContext.type === 'playlist') return; // Playlists don't auto-fetch randoms
+    if (playbackContext.type === 'playlist') return;
     try {
       const seed = currentTrack?.artist || 'Trending Music';
       const res = await fetch(`/api/search?q=${encodeURIComponent(seed + ' recommendations')}`);
@@ -220,6 +271,9 @@ export function PlayerProvider({ children }) {
     setIsPlaying(true);
     setCurrentTime(0);
     setDuration(track.duration || 240);
+    saveState('kymatix_last_track', track);
+    saveState('kymatix_playback_time', 0);
+
     setPlaybackContext({
       type: context.isPlaylist ? 'playlist' : context.isArtistPage ? 'artist' : 'feed',
       sourceId: context.playlistId || null,
@@ -227,7 +281,6 @@ export function PlayerProvider({ children }) {
     });
 
     const trackWithTime = { ...track, playedAt: Date.now() };
-
     setHistory((prev) => {
       const filtered = prev.filter((t) => t.id !== track.id);
       const updated = [trackWithTime, ...filtered].slice(0, 100);
@@ -248,8 +301,8 @@ export function PlayerProvider({ children }) {
 
     if (!primaryPlayerRef.current && window.YT && window.YT.Player) {
       primaryPlayerRef.current = new window.YT.Player('kymatix-primary-engine', {
-        height: '200',
-        width: '200',
+        height: '100',
+        width: '100',
         videoId: track.videoId,
         playerVars: { autoplay: 1, controls: 0, playsinline: 1, rel: 0 },
         events: {
@@ -284,13 +337,14 @@ export function PlayerProvider({ children }) {
   const handleNext = () => {
     if (repeatMode === 'one') {
       seek(0);
-      togglePlay();
       return;
     }
     if (userQueue.length > 0) {
       const nextIndex = isShuffle ? Math.floor(Math.random() * userQueue.length) : 0;
       const next = userQueue[nextIndex];
-      setUserQueue((prev) => prev.filter((_, i) => i !== nextIndex));
+      const updatedQueue = userQueue.filter((_, i) => i !== nextIndex);
+      setUserQueue(updatedQueue);
+      saveState('kymatix_user_queue', updatedQueue);
       playTrack(next, { isPlaylist: playbackContext.type === 'playlist', trackList: playbackContext.list });
       return;
     }
@@ -313,7 +367,12 @@ export function PlayerProvider({ children }) {
   };
 
   const togglePlay = () => {
-    if (!primaryPlayerRef.current) return;
+    if (!primaryPlayerRef.current) {
+      if (currentTrack) {
+        playTrack(currentTrack);
+      }
+      return;
+    }
     if (isPlaying) {
       primaryPlayerRef.current.pauseVideo();
       setIsPlaying(false);
@@ -327,12 +386,14 @@ export function PlayerProvider({ children }) {
     if (!primaryPlayerRef.current?.seekTo) return;
     primaryPlayerRef.current.seekTo(time, true);
     setCurrentTime(time);
+    saveState('kymatix_playback_time', time);
   };
 
   const changeVolume = (val) => {
     const v = parseInt(val, 10);
     setVolume(v);
     setIsMuted(v === 0);
+    saveState('kymatix_volume', v);
     if (primaryPlayerRef.current?.setVolume) {
       primaryPlayerRef.current.setVolume(v);
     }
@@ -348,13 +409,33 @@ export function PlayerProvider({ children }) {
     }
   };
 
-  const addToQueue = (track) => {
-    setUserQueue((prev) => [...prev, track]);
-    preloadNextCandidate(track);
+  const handleShuffleToggle = (val) => {
+    const newVal = typeof val === 'boolean' ? val : !isShuffle;
+    setIsShuffle(newVal);
+    saveState('kymatix_shuffle', newVal);
   };
 
-  const removeFromUserQueue = (index) => setUserQueue((prev) => prev.filter((_, idx) => idx !== index));
-  const clearUserQueue = () => setUserQueue([]);
+  const handleRepeatModeChange = (mode) => {
+    setRepeatMode(mode);
+    saveState('kymatix_repeat', mode);
+  };
+
+  const addToQueue = (track) => {
+    const updated = [...userQueue, track];
+    setUserQueue(updated);
+    saveState('kymatix_user_queue', updated);
+  };
+
+  const removeFromUserQueue = (index) => {
+    const updated = userQueue.filter((_, idx) => idx !== index);
+    setUserQueue(updated);
+    saveState('kymatix_user_queue', updated);
+  };
+
+  const clearUserQueue = () => {
+    setUserQueue([]);
+    saveState('kymatix_user_queue', []);
+  };
 
   const toggleLike = (track) => {
     setLikedSongs((prev) => {
@@ -400,7 +481,7 @@ export function PlayerProvider({ children }) {
           const t = primaryPlayerRef.current.getCurrentTime();
           if (t >= 0) setCurrentTime(t);
         }
-      }, 200);
+      }, 250);
     } else {
       clearInterval(timerRef.current);
     }
@@ -446,15 +527,23 @@ export function PlayerProvider({ children }) {
         setIsModalOpen,
         setIsQueueOpen,
         setIsInfoSidebarOpen,
-        setIsShuffle,
-        setRepeatMode,
+        setIsShuffle: handleShuffleToggle,
+        toggleShuffle: handleShuffleToggle,
+        setRepeatMode: handleRepeatModeChange,
+        toggleRepeat: () => {
+          if (repeatMode === 'off') handleRepeatModeChange('all');
+          else if (repeatMode === 'all') handleRepeatModeChange('one');
+          else handleRepeatModeChange('off');
+        },
         setRecentQueries,
         playTrack,
         fetchMoreQueueTracks,
         handleNext,
         handlePrevious,
+        handlePrev: handlePrevious,
         togglePlay,
         seek,
+        seekTo: seek,
         changeVolume,
         toggleMute,
         addToQueue,
@@ -470,7 +559,6 @@ export function PlayerProvider({ children }) {
     >
       <div className="fixed -bottom-[500px] -right-[500px] pointer-events-none opacity-0">
         <div id="kymatix-primary-engine" />
-        <div id="kymatix-preload-engine" />
       </div>
       {children}
     </PlayerContext.Provider>

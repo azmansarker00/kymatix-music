@@ -8,6 +8,8 @@ import LyricsView from '@/components/LyricsView';
 import TrackInfoSidebar from '@/components/TrackInfoSidebar';
 import ArtistPage from '@/components/ArtistPage';
 import WaveformScrubber from '@/components/WaveformScrubber';
+import DeviceConnectModal from '@/components/DeviceConnectModal';
+import Logo from '@/components/Logo';
 import { 
   Heart, 
   Clock, 
@@ -42,7 +44,9 @@ import {
   ListMusic,
   X,
   Loader2,
-  Sparkles
+  Sparkles,
+  Cast,
+  Wifi
 } from 'lucide-react';
 import { App as CapApp } from '@capacitor/app';
 
@@ -98,8 +102,14 @@ export default function Home() {
     toggleTheme,
     viewLayout = 'grid',
     toggleLayout,
+    is2GMode,
+    setIs2GMode,
+    isSettingsOpen,
     setIsSettingsOpen,
+    isQueueOpen,
     setIsQueueOpen,
+    isModalOpen,
+    setIsModalOpen,
     clearHistoryNow,
     currentTime = 0,
     duration = 0,
@@ -119,14 +129,18 @@ export default function Home() {
   const [selectedPlaylist, setSelectedPlaylist] = useState(null);
   const [trendingSort, setTrendingSort] = useState('daily_viral');
   const [pinnedIds, setPinnedIds] = useState(['loved-pin', 'fav-1']);
-  const [isDataSaver, setIsDataSaver] = useState(true);
   const [isFullScreen, setIsFullScreen] = useState(false);
+  const [isConnectOpen, setIsConnectOpen] = useState(false);
 
   // Mobile Dedicated Fullscreen Glass Lyrics State & Ref
   const [isMobileLyricsOpen, setIsMobileLyricsOpen] = useState(false);
   const [mobileLyrics, setMobileLyrics] = useState([]);
   const [lyricsLoading, setLyricsLoading] = useState(false);
-  const activeLineRef = useRef(null);
+  const activeLyricRef = useRef(null);
+
+  // Android Double Tap Exit Toast State
+  const [showExitToast, setShowExitToast] = useState(false);
+  const lastBackPressTime = useRef(0);
 
   const canvasRef = useRef(null);
   const isDark = theme === 'dark';
@@ -135,19 +149,62 @@ export default function Home() {
     try {
       const savedPins = localStorage.getItem('kymatix_pinned_playlists');
       if (savedPins) setPinnedIds(JSON.parse(savedPins));
-      const savedSaver = localStorage.getItem('kymatix_data_saver');
-      if (savedSaver !== null) setIsDataSaver(savedSaver === 'true');
     } catch {}
   }, []);
 
+  // 1. SMART ANDROID HARDWARE BACK-BUTTON NAVIGATION
   useEffect(() => {
     const handleBackButton = async () => {
+      // Step 1: Device Connect Modal
+      if (isConnectOpen) {
+        setIsConnectOpen(false);
+        return;
+      }
+      // Step 2: Dedicated Fullscreen Lyrics
       if (isMobileLyricsOpen) {
         setIsMobileLyricsOpen(false);
-      } else if (isFullScreen) {
+        return;
+      }
+      // Step 3: Global Drawers and Modals
+      if (isQueueOpen) {
+        setIsQueueOpen(false);
+        return;
+      }
+      if (isModalOpen) {
+        setIsModalOpen(false);
+        return;
+      }
+      if (isSettingsOpen) {
+        setIsSettingsOpen(false);
+        return;
+      }
+      // Step 4: Spotify Fullscreen Sheet
+      if (isFullScreen) {
         setIsFullScreen(false);
-      } else {
+        return;
+      }
+      // Step 5: Sub-routes to Root Home
+      if (selectedArtist) {
+        setSelectedArtist(null);
+        return;
+      }
+      if (selectedPlaylist) {
+        setSelectedPlaylist(null);
+        return;
+      }
+      if (activeTab !== 'home') {
+        setActiveTab('home');
+        return;
+      }
+
+      // Step 6: Root Exit Guard (Double-tap within 2 seconds)
+      const now = Date.now();
+      if (now - lastBackPressTime.current < 2000) {
         CapApp.exitApp();
+      } else {
+        lastBackPressTime.current = now;
+        setShowExitToast(true);
+        setTimeout(() => setShowExitToast(false), 2000);
       }
     };
 
@@ -161,7 +218,17 @@ export default function Home() {
     return () => {
       if (backListener && backListener.remove) backListener.remove();
     };
-  }, [isFullScreen, isMobileLyricsOpen]);
+  }, [
+    isConnectOpen,
+    isMobileLyricsOpen,
+    isQueueOpen,
+    isModalOpen,
+    isSettingsOpen,
+    isFullScreen,
+    selectedArtist,
+    selectedPlaylist,
+    activeTab
+  ]);
 
   // Cycle Repeat Mode matching PlayerBar logic
   const cycleRepeat = () => {
@@ -226,8 +293,8 @@ export default function Home() {
 
   // Auto-scroll lyrics smoothly
   useEffect(() => {
-    if (activeLineRef.current) {
-      activeLineRef.current.scrollIntoView({
+    if (activeLyricRef.current) {
+      activeLyricRef.current.scrollIntoView({
         behavior: 'smooth',
         block: 'center'
       });
@@ -407,20 +474,24 @@ export default function Home() {
       </div>
       <div className={`fixed inset-0 pointer-events-none z-0 ${isDark ? 'bg-[#08090C]/40' : 'bg-white/40'}`} />
 
+      {/* Double Tap Exit Toast */}
+      {showExitToast && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[999999] bg-[#1F1F23]/95 backdrop-blur-xl border border-white/20 text-white px-5 py-2.5 rounded-full text-xs font-semibold shadow-2xl animate-in fade-in duration-200">
+          Press back again to exit
+        </div>
+      )}
+
       {/* 1. DESKTOP SIDEBAR */}
       <aside className={`w-64 border-r p-6 flex flex-col justify-between hidden lg:flex z-40 fixed left-0 top-0 bottom-0 backdrop-blur-[32px] saturate-[190%] transition-colors ${
         isDark ? 'bg-white/5 border-white/10' : 'bg-white/70 border-slate-200/80 shadow-sm'
       }`}>
         <div>
+          {/* Logo Integration */}
           <div className="flex items-center space-x-3 mb-8 px-1">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#FFB3B6] to-[#D0BCFF] flex items-center justify-center p-0.5 border border-white/20 shadow-md">
-              <div className="w-full h-full bg-[#08090C] rounded-full flex items-center justify-center">
-                <span className="text-xs font-bold text-white tracking-wider">KY</span>
-              </div>
-            </div>
+            <Logo size={40} />
             <div>
               <span className={`font-bold tracking-tight text-lg ${isDark ? 'text-white' : 'text-slate-900'}`}>KYMATIX</span>
-              <p className="text-[10px] text-[#FFB3B6] font-mono tracking-widest uppercase">Studio Glass</p>
+              <p className="text-[10px] text-[#00F2FE] font-mono tracking-widest uppercase">Studio classic</p>
             </div>
           </div>
 
@@ -492,6 +563,20 @@ export default function Home() {
             ) : (
               <><Sun size={15} className="text-amber-500" /> <span>Light Theme</span></>
             )}
+          </button>
+
+          {/* Ultra Data Saver Toggle */}
+          <button
+            onClick={() => setIs2GMode && setIs2GMode(!is2GMode)}
+            className={`w-full flex items-center justify-between py-2 px-3 rounded-2xl border text-xs font-semibold transition ${
+              is2GMode ? 'bg-[#00F2FE]/15 border-[#00F2FE]/40 text-[#00F2FE]' : 'bg-white/5 border-white/10 text-white/60 hover:text-white'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <Wifi size={14} />
+              <span>Ultra Data Saver</span>
+            </div>
+            <span className="text-[10px] uppercase font-mono">{is2GMode ? '64kbps' : 'OFF'}</span>
           </button>
 
           <div className="w-full flex items-center justify-between p-1 rounded-2xl bg-white/5 border border-white/10">
@@ -697,10 +782,10 @@ export default function Home() {
       </div>
 
       {/* ========================================================================= */}
-      {/* 3. MOBILE RESPONSIVE FIX: MINI PLAYER & BOTTOM DOCK NAVIGATION */}
+      {/* 3. MOBILE RESPONSIVE: MINI PLAYER & BOTTOM DOCK NAVIGATION */}
       {/* ========================================================================= */}
       
-      {/* Mobile Floating Mini Player (Fixed cleanly at bottom-20 above nav bar) */}
+      {/* Mobile Floating Mini Player */}
       {currentTrack && (
         <div className="fixed bottom-20 left-3 right-3 z-40 lg:hidden flex justify-center pointer-events-none">
           <div 
@@ -724,7 +809,7 @@ export default function Home() {
         </div>
       )}
 
-      {/* Mobile Bottom Navigation Dock (Spotify Style Routing) */}
+      {/* Mobile Bottom Navigation Dock */}
       <nav className="fixed bottom-0 w-full z-40 flex lg:hidden justify-around items-center px-4 h-16 bg-[#1F1F23]/95 backdrop-blur-[32px] border-t border-white/10 pb-[env(safe-area-inset-bottom,12px)] shadow-2xl">
         <button 
           onClick={() => { setActiveTab('home'); setSelectedArtist(null); setSelectedPlaylist(null); }}
@@ -763,7 +848,7 @@ export default function Home() {
       {isFullScreen && currentTrack && (
         <div className="lg:hidden fixed inset-0 z-[99999] bg-[#08090C] overflow-y-auto no-scrollbar animate-in slide-in-from-bottom duration-300 select-none">
           
-          {/* Header sticky top with Queue Button */}
+          {/* Header sticky top */}
           <div className="sticky top-0 z-20 w-full flex justify-between items-center p-6 bg-[#08090C]/80 backdrop-blur-md">
             <button onClick={() => setIsFullScreen(false)} className="p-2 text-white/70 hover:text-white">
               <ChevronDown size={24} />
@@ -772,6 +857,13 @@ export default function Home() {
               {currentTrack.artist}
             </span>
             <div className="flex items-center gap-1">
+              <button 
+                onClick={() => setIsConnectOpen(true)} 
+                className="p-2 text-white/70 hover:text-[#00F2FE] transition"
+                title="Connect Devices"
+              >
+                <Cast size={20} />
+              </button>
               <button 
                 onClick={() => setIsQueueOpen && setIsQueueOpen(true)} 
                 className="p-2 text-white/70 hover:text-[#00F2FE] transition"
@@ -803,7 +895,7 @@ export default function Home() {
                 </button>
               </div>
 
-              {/* Desktop-matching WaveformScrubber for precise length/time control */}
+              {/* WaveformScrubber for precise length/time control */}
               <div className="w-full flex items-center gap-3 text-xs text-white/50 font-mono">
                 <span className="w-8 text-right">{formatTime(currentTime)}</span>
                 <div className="flex-1">
@@ -812,7 +904,7 @@ export default function Home() {
                 <span className="w-8">{formatTime(duration)}</span>
               </div>
 
-              {/* Fully Working Player Controls matching PlayerBar.js */}
+              {/* Player Controls matching PlayerBar.js */}
               <div className="flex justify-between items-center px-2">
                 <button 
                   onClick={() => setIsShuffle && setIsShuffle(!isShuffle)}
@@ -848,7 +940,7 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Clickable Synced Lyrics Card (Opens Dedicated Glass Fullscreen Page) */}
+            {/* Clickable Synced Lyrics Card */}
             <div 
               onClick={() => setIsMobileLyricsOpen(true)}
               className="w-full max-w-[320px] mt-10 p-6 rounded-[28px] bg-white/5 backdrop-blur-[32px] border border-white/10 shadow-2xl cursor-pointer hover:border-white/30 transition group"
@@ -938,7 +1030,7 @@ export default function Home() {
                 return (
                   <p
                     key={idx}
-                    ref={isActive ? activeLineRef : null}
+                    ref={isActive ? activeLyricRef : null}
                     onClick={() => line.time !== null && seekTo && seekTo(line.time)}
                     className={`transition-all duration-300 cursor-pointer font-bold select-none text-center px-4 ${
                       isActive
@@ -965,6 +1057,7 @@ export default function Home() {
       <TrackInfoSidebar />
       <QueueDrawer />
       <LyricsView />
+      <DeviceConnectModal isOpen={isConnectOpen} onClose={() => setIsConnectOpen(false)} />
       <PlayerBar />
     </div>
   );

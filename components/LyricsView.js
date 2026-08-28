@@ -2,7 +2,8 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { usePlayer } from '@/context/PlayerContext';
-import { X, Radio, Loader2, Sparkles } from 'lucide-react';
+import { X, Loader2, Sparkles } from 'lucide-react';
+import Logo from '@/components/Logo';
 
 function cleanTrackTitle(title) {
   if (!title) return '';
@@ -19,13 +20,18 @@ function cleanTrackTitle(title) {
 }
 
 export default function LyricsView() {
-  const { isModalOpen, setIsModalOpen, currentTrack, currentTime = 0, seek } = usePlayer() || {};
+  const { isModalOpen, setIsModalOpen, currentTrack, currentTime = 0, seek, seekTo } = usePlayer() || {};
   
   const [fetchedLyrics, setFetchedLyrics] = useState('');
   const [loading, setLoading] = useState(false);
   const activeLineRef = useRef(null);
 
-  // গান পরিবর্তন বা মডাল ওপেন হলে স্বয়ংক্রিয়ভাবে ব্যাকএন্ড API থেকে লিরিক্স ফেচ করা
+  const handleSeek = (time) => {
+    if (typeof seek === 'function') seek(time);
+    else if (typeof seekTo === 'function') seekTo(time);
+  };
+
+  // গান পরিবর্তন বা মোডাল ওপেন হলে ব্যাকএন্ড API থেকে লিরিক্স ফেচ করা
   useEffect(() => {
     if (!isModalOpen || !currentTrack) return;
 
@@ -40,7 +46,6 @@ export default function LyricsView() {
         const res = await fetch(`/api/lyrics?title=${encodeURIComponent(cleanTitle)}&artist=${encodeURIComponent(cleanArtist)}`);
         const data = await res.json();
 
-        // সিঙ্কড লیرিক্স বা প্লেইন লিরিক্স যাই পাক না কেন সেট করবে
         if (data.synced) {
           setFetchedLyrics(data.synced);
         } else if (data.lyrics) {
@@ -61,7 +66,7 @@ export default function LyricsView() {
   // LRC টাইমস্ট্যাম্প পার্সার
   const parsedLyrics = useMemo(() => {
     if (!fetchedLyrics) return [];
-    const lines = fetchedLyrics.split('\n');
+    const lines = typeof fetchedLyrics === 'string' ? fetchedLyrics.split('\n') : [];
     const result = [];
     const timeExp = /\[(\d{2}):(\d{2})(?:\.(\d{2,3}))?\]/;
 
@@ -81,7 +86,7 @@ export default function LyricsView() {
     return result;
   }, [fetchedLyrics]);
 
-  // রিয়েল-টাইম কারাওকে অ্যাক্টিভ লাইন ট্র্যাকিং
+  // রিয়েল-টাইম সিঙ্ক ট্র্যাকিং
   const activeIndex = useMemo(() => {
     let index = -1;
     for (let i = 0; i < parsedLyrics.length; i++) {
@@ -104,7 +109,7 @@ export default function LyricsView() {
   return (
     <div className="fixed inset-0 z-[999999] bg-[#08090C]/90 backdrop-blur-[50px] saturate-[200%] flex flex-col items-center justify-between p-6 sm:p-12 animate-in fade-in zoom-in-95 duration-300 select-none overflow-hidden">
       
-      {/* ব্যাকগ্রাউন্ড ডায়নামিক ব্লার গ্লো */}
+      {/* Background Dynamic Blur Glow */}
       <div 
         className="absolute inset-0 bg-cover bg-center opacity-25 filter blur-[90px] pointer-events-none scale-125"
         style={{ backgroundImage: `url(${currentTrack.thumbnail || currentTrack.cover})` }}
@@ -153,7 +158,7 @@ export default function LyricsView() {
               <p
                 key={idx}
                 ref={isActive ? activeLineRef : null}
-                onClick={() => line.time !== null && typeof seek === 'function' && seek(line.time)}
+                onClick={() => line.time !== null && handleSeek(line.time)}
                 className={`transition-all duration-300 cursor-pointer font-bold select-none text-center ${
                   isActive
                     ? 'text-white text-2xl sm:text-3xl scale-105 opacity-100 drop-shadow-[0_0_25px_rgba(255,255,255,0.5)]'
@@ -168,9 +173,15 @@ export default function LyricsView() {
       </div>
 
       {/* Footer Info */}
-      <div className="text-[11px] font-mono tracking-widest text-white/40 uppercase z-10 flex items-center gap-2 border-t border-white/10 w-full max-w-4xl pt-4">
-        <Sparkles size={13} className="text-[#00F2FE] animate-pulse" />
-        <span>Kymatix Liquid Glass Synchronized Lyrics</span>
+      <div className="text-[11px] font-mono tracking-widest text-white/40 uppercase z-10 flex items-center justify-between border-t border-white/10 w-full max-w-4xl pt-4">
+        <div className="flex items-center gap-2">
+          <Logo size={24} />
+          <span className="font-bold tracking-tight text-white text-sm">KYMATIX STUDIO</span>
+        </div>
+        <div className="flex items-center gap-1.5 text-[#00F2FE]">
+          <Sparkles size={13} className="animate-pulse" />
+          <span>Synchronized Lyrics</span>
+        </div>
       </div>
     </div>
   );
