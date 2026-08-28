@@ -45,6 +45,7 @@ export function PlayerProvider({ children }) {
   const primaryPlayerRef = useRef(null);
   const timerRef = useRef(null);
   const isInitialRestored = useRef(false);
+  const keepAliveAudio = useRef(null);
 
   const saveState = (key, val) => {
     try { localStorage.setItem(key, typeof val === 'string' ? val : JSON.stringify(val)); } catch {}
@@ -64,9 +65,14 @@ export function PlayerProvider({ children }) {
     return loadedHistory.filter((item) => now - (item.playedAt || now) <= maxAge);
   };
 
-  // 1. Restore Persistent Session on Initial Load (Spotify Style)
+  // 1. Restore Persistent Session on Initial Load & Initialize Keep-Alive Audio
   useEffect(() => {
     try {
+      if (typeof window !== 'undefined') {
+        keepAliveAudio.current = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA');
+        keepAliveAudio.current.loop = true;
+      }
+
       const savedTheme = localStorage.getItem('kymatix_theme');
       if (savedTheme) setTheme(savedTheme);
 
@@ -105,7 +111,6 @@ export function PlayerProvider({ children }) {
       const savedQueue = localStorage.getItem('kymatix_user_queue');
       if (savedQueue) setUserQueue(JSON.parse(savedQueue));
 
-      // Restore Last Played Track and Timestamp
       const savedTrack = localStorage.getItem('kymatix_last_track');
       const savedTime = localStorage.getItem('kymatix_playback_time');
       if (savedTrack) {
@@ -128,7 +133,7 @@ export function PlayerProvider({ children }) {
     }
   }, [currentTime, currentTrack]);
 
-  // 2. Dynamic Tab Title Update Engine (Track • Artist | KYMATIX STUDIO)
+  // 2. Dynamic Tab Title Update Engine
   useEffect(() => {
     if (typeof document === 'undefined') return;
     if (currentTrack && isPlaying) {
@@ -140,7 +145,6 @@ export function PlayerProvider({ children }) {
     }
   }, [currentTrack, isPlaying]);
 
-  // Save Settings State
   const toggleTheme = (newTheme) => {
     setTheme(newTheme);
     saveState('kymatix_theme', newTheme);
@@ -164,7 +168,7 @@ export function PlayerProvider({ children }) {
     saveState('kymatix_history', []);
   };
 
-  // 3. Background Playback & MediaSession API (Lockscreen/Notification Media Controls)
+  // 3. Background Playback & MediaSession API
   useEffect(() => {
     if (!currentTrack || typeof window === 'undefined' || !('mediaSession' in navigator)) return;
 
@@ -205,7 +209,7 @@ export function PlayerProvider({ children }) {
     }
   }, [isPlaying]);
 
-  // 4. YouTube Hidden Engine Loader for Audio Pipeline
+  // 4. YouTube Hidden Engine Loader
   useEffect(() => {
     if (!window.YT) {
       const tag = document.createElement('script');
@@ -266,6 +270,11 @@ export function PlayerProvider({ children }) {
 
   const playTrack = (track, context = {}) => {
     if (!track?.videoId) return;
+
+    // ব্যাকগ্রাউন্ডে অ্যান্ড্রয়েড ওএস সেশন চালু রাখার জন্য সাইলেন্ট অডিও প্লে করা
+    if (keepAliveAudio.current) {
+      keepAliveAudio.current.play().catch(() => {});
+    }
 
     setCurrentTrack(track);
     setIsPlaying(true);
@@ -374,9 +383,11 @@ export function PlayerProvider({ children }) {
       return;
     }
     if (isPlaying) {
+      if (keepAliveAudio.current) keepAliveAudio.current.pause();
       primaryPlayerRef.current.pauseVideo();
       setIsPlaying(false);
     } else {
+      if (keepAliveAudio.current) keepAliveAudio.current.play().catch(() => {});
       primaryPlayerRef.current.playVideo();
       setIsPlaying(true);
     }
