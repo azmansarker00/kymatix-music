@@ -42,10 +42,9 @@ export function PlayerProvider({ children }) {
   // Active Playback Context Info
   const [playbackContext, setPlaybackContext] = useState({ type: 'feed', sourceId: null, list: [] });
 
-  const primaryPlayerRef = useRef(null);
-  const timerRef = useRef(null);
+  // Native HTML5 Audio Engine Ref
+  const audioRef = useRef(null);
   const isInitialRestored = useRef(false);
-  const keepAliveAudio = useRef(null);
 
   const saveState = (key, val) => {
     try { localStorage.setItem(key, typeof val === 'string' ? val : JSON.stringify(val)); } catch {}
@@ -65,12 +64,25 @@ export function PlayerProvider({ children }) {
     return loadedHistory.filter((item) => now - (item.playedAt || now) <= maxAge);
   };
 
-  // 1. Restore Persistent Session on Initial Load & Initialize Keep-Alive Audio
+  // 1. Initial Load & Native Audio Event Listeners
   useEffect(() => {
     try {
       if (typeof window !== 'undefined') {
-        keepAliveAudio.current = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA');
-        keepAliveAudio.current.loop = true;
+        const audio = new Audio();
+        audio.preload = 'auto';
+
+        audio.ontimeupdate = () => {
+          setCurrentTime(audio.currentTime);
+          if (audio.duration && !isNaN(audio.duration)) {
+            setDuration(Math.round(audio.duration));
+          }
+        };
+
+        audio.onplay = () => setIsPlaying(true);
+        audio.onpause = () => setIsPlaying(false);
+        audio.onended = () => handleNext();
+
+        audioRef.current = audio;
       }
 
       const savedTheme = localStorage.getItem('kymatix_theme');
@@ -106,7 +118,11 @@ export function PlayerProvider({ children }) {
       if (savedRepeat) setRepeatMode(savedRepeat);
 
       const savedVolume = localStorage.getItem('kymatix_volume');
-      if (savedVolume !== null) setVolume(parseInt(savedVolume, 10));
+      if (savedVolume !== null) {
+        const v = parseInt(savedVolume, 10);
+        setVolume(v);
+        if (audioRef.current) audioRef.current.volume = v / 100;
+      }
 
       const savedQueue = localStorage.getItem('kymatix_user_queue');
       if (savedQueue) setUserQueue(JSON.parse(savedQueue));
@@ -126,14 +142,14 @@ export function PlayerProvider({ children }) {
     } catch {}
   }, []);
 
-  // Save Playback Time State Periodically
+  // Save Playback Time Periodically
   useEffect(() => {
     if (currentTime > 0 && currentTrack) {
       saveState('kymatix_playback_time', currentTime);
     }
   }, [currentTime, currentTrack]);
 
-  // 2. Dynamic Tab Title Update Engine
+  // 2. Dynamic Tab Title
   useEffect(() => {
     if (typeof document === 'undefined') return;
     if (currentTrack && isPlaying) {
@@ -168,7 +184,7 @@ export function PlayerProvider({ children }) {
     saveState('kymatix_history', []);
   };
 
-  // 3. Background Playback & MediaSession API
+  // 3. Android System Notification & Lockscreen MediaSession Controller
   useEffect(() => {
     if (!currentTrack || typeof window === 'undefined' || !('mediaSession' in navigator)) return;
 
@@ -208,15 +224,6 @@ export function PlayerProvider({ children }) {
       navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
     }
   }, [isPlaying]);
-
-  // 4. YouTube Hidden Engine Loader
-  useEffect(() => {
-    if (!window.YT) {
-      const tag = document.createElement('script');
-      tag.src = 'https://www.youtube.com/iframe_api';
-      document.body.appendChild(tag);
-    }
-  }, []);
 
   const populateAutoQueue = async (seedTrack, context = {}) => {
     try {
@@ -268,13 +275,9 @@ export function PlayerProvider({ children }) {
     } catch {}
   };
 
-  const playTrack = (track, context = {}) => {
+  // 4. Pure Audio Play Engine (No Video / Low Data Usage)
+  const playTrack = async (track, context = {}) => {
     if (!track?.videoId) return;
-
-    // ব্যাকগ্রাউন্ডে অ্যান্ড্রয়েড ওএস সেশন চালু রাখার জন্য সাইলেন্ট অডিও প্লে করা
-    if (keepAliveAudio.current) {
-      keepAliveAudio.current.play().catch(() => {});
-    }
 
     setCurrentTrack(track);
     setIsPlaying(true);
@@ -306,46 +309,24 @@ export function PlayerProvider({ children }) {
       .then((data) => setLyrics(data.lyrics || 'No synchronized lyrics available.'))
       .catch(() => setLyrics(''));
 
-    const targetQuality = is2GMode ? 'small' : 'medium';
+    try {
+      const res = await fetch(`/api/stream?videoId=${track.videoId}`);
+      const data = await res.json();
 
-    if (!primaryPlayerRef.current && window.YT && window.YT.Player) {
-      primaryPlayerRef.current = new window.YT.Player('kymatix-primary-engine', {
-        height: '100',
-        width: '100',
-        videoId: track.videoId,
-        playerVars: { autoplay: 1, controls: 0, playsinline: 1, rel: 0 },
-        events: {
-          onReady: (e) => {
-            e.target.setPlaybackQuality?.(targetQuality);
-            e.target.setVolume(isMuted ? 0 : volume);
-            e.target.playVideo();
-          },
-          onStateChange: (e) => {
-            if (e.data === window.YT.PlayerState.PLAYING) {
-              setIsPlaying(true);
-              const realDur = e.target.getDuration();
-              if (realDur) setDuration(Math.round(realDur));
-            } else if (e.data === window.YT.PlayerState.PAUSED) {
-              setIsPlaying(false);
-            } else if (e.data === window.YT.PlayerState.ENDED) {
-              handleNext();
-            }
-          },
-        },
-      });
-    } else if (primaryPlayerRef.current?.loadVideoById) {
-      primaryPlayerRef.current.loadVideoById({
-        videoId: track.videoId,
-        suggestedQuality: targetQuality
-      });
-      primaryPlayerRef.current.setVolume(isMuted ? 0 : volume);
-      primaryPlayerRef.current.playVideo();
+      if (data.streamUrl && audioRef.current) {
+        audioRef.current.src = data.streamUrl;
+        audioRef.current.volume = isMuted ? 0 : volume / 100;
+        await audioRef.current.play();
+      }
+    } catch (e) {
+      console.error('Audio Stream Load Error:', e);
     }
   };
 
   const handleNext = () => {
     if (repeatMode === 'one') {
       seek(0);
+      audioRef.current?.play();
       return;
     }
     if (userQueue.length > 0) {
@@ -376,26 +357,19 @@ export function PlayerProvider({ children }) {
   };
 
   const togglePlay = () => {
-    if (!primaryPlayerRef.current) {
-      if (currentTrack) {
-        playTrack(currentTrack);
-      }
-      return;
-    }
+    if (!audioRef.current) return;
     if (isPlaying) {
-      if (keepAliveAudio.current) keepAliveAudio.current.pause();
-      primaryPlayerRef.current.pauseVideo();
+      audioRef.current.pause();
       setIsPlaying(false);
     } else {
-      if (keepAliveAudio.current) keepAliveAudio.current.play().catch(() => {});
-      primaryPlayerRef.current.playVideo();
+      audioRef.current.play().catch(() => {});
       setIsPlaying(true);
     }
   };
 
   const seek = (time) => {
-    if (!primaryPlayerRef.current?.seekTo) return;
-    primaryPlayerRef.current.seekTo(time, true);
+    if (!audioRef.current) return;
+    audioRef.current.currentTime = time;
     setCurrentTime(time);
     saveState('kymatix_playback_time', time);
   };
@@ -405,8 +379,8 @@ export function PlayerProvider({ children }) {
     setVolume(v);
     setIsMuted(v === 0);
     saveState('kymatix_volume', v);
-    if (primaryPlayerRef.current?.setVolume) {
-      primaryPlayerRef.current.setVolume(v);
+    if (audioRef.current) {
+      audioRef.current.volume = v / 100;
     }
   };
 
@@ -416,7 +390,7 @@ export function PlayerProvider({ children }) {
       changeVolume(volume || 50);
     } else {
       setIsMuted(true);
-      if (primaryPlayerRef.current) primaryPlayerRef.current.setVolume(0);
+      if (audioRef.current) audioRef.current.volume = 0;
     }
   };
 
@@ -485,20 +459,6 @@ export function PlayerProvider({ children }) {
     saveState('kymatix_playlists', updated);
   };
 
-  useEffect(() => {
-    if (isPlaying) {
-      timerRef.current = setInterval(() => {
-        if (primaryPlayerRef.current?.getCurrentTime) {
-          const t = primaryPlayerRef.current.getCurrentTime();
-          if (t >= 0) setCurrentTime(t);
-        }
-      }, 250);
-    } else {
-      clearInterval(timerRef.current);
-    }
-    return () => clearInterval(timerRef.current);
-  }, [isPlaying]);
-
   return (
     <PlayerContext.Provider
       value={{
@@ -529,8 +489,14 @@ export function PlayerProvider({ children }) {
         isInfoSidebarOpen,
         activeTab,
         selectedArtist,
-        toggleTheme,
-        toggleLayout,
+        toggleTheme: (t) => {
+          setTheme(t);
+          saveState('kymatix_theme', t);
+        },
+        toggleLayout: (l) => {
+          setViewLayout(l);
+          saveState('kymatix_layout', l);
+        },
         setIsSettingsOpen,
         setIs2GMode,
         setActiveTab,
@@ -568,9 +534,6 @@ export function PlayerProvider({ children }) {
         addToPlaylist,
       }}
     >
-      <div className="fixed -bottom-[500px] -right-[500px] pointer-events-none opacity-0">
-        <div id="kymatix-primary-engine" />
-      </div>
       {children}
     </PlayerContext.Provider>
   );
