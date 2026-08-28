@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { usePlayer } from '@/context/PlayerContext';
 import PlayerBar from '@/components/PlayerBar';
 import TrackInfoSidebar from '@/components/TrackInfoSidebar';
@@ -20,13 +20,19 @@ import {
   Sliders, 
   Pin, 
   Music2, 
-  Trash2, 
-  CalendarClock, 
-  AlertTriangle 
+  Settings, 
+  Bell, 
+  User, 
+  Home as HomeIcon,
+  Sun,
+  Moon,
+  Trash2,
+  LibraryBig
 } from 'lucide-react';
+import { App as CapApp } from '@capacitor/app';
 
 function formatDuration(sec) {
-  if (!sec) return '3:45';
+  if (!sec || isNaN(sec)) return '0:00';
   const m = Math.floor(sec / 60);
   const s = Math.floor(sec % 60);
   return `${m}:${s < 10 ? '0' : ''}${s}`;
@@ -39,27 +45,25 @@ export default function Home() {
     isPlaying,
     togglePlay,
     addToQueue,
-    likedSongs,
+    likedSongs = [],
     toggleLike,
-    history,
-    historyRetention,
-    changeHistoryRetention,
-    clearHistoryNow,
-    playlists,
+    history = [],
+    playlists = [],
     createPlaylist,
     addToPlaylist,
-    followedArtists,
+    followedArtists = [],
     toggleFollowArtist,
     activeTab,
     setActiveTab,
     selectedArtist,
     setSelectedArtist,
-    recentQueries,
     setRecentQueries,
-    theme,
-    viewLayout,
+    theme = 'dark',
+    toggleTheme,
+    viewLayout = 'grid',
     toggleLayout,
-    setIsSettingsOpen
+    setIsSettingsOpen,
+    clearHistoryNow
   } = usePlayer();
 
   const [query, setQuery] = useState('');
@@ -69,16 +73,41 @@ export default function Home() {
   const [selectedPlaylist, setSelectedPlaylist] = useState(null);
   const [trendingSort, setTrendingSort] = useState('daily_viral');
   const [pinnedIds, setPinnedIds] = useState(['loved-pin', 'fav-1']);
-  const [isConfirmClearOpen, setIsConfirmClearOpen] = useState(false);
+  const [isDataSaver, setIsDataSaver] = useState(true);
+  const [isFullScreen, setIsFullScreen] = useState(false);
 
+  const canvasRef = useRef(null);
   const isDark = theme === 'dark';
 
   useEffect(() => {
     try {
       const savedPins = localStorage.getItem('kymatix_pinned_playlists');
       if (savedPins) setPinnedIds(JSON.parse(savedPins));
+      const savedSaver = localStorage.getItem('kymatix_data_saver');
+      if (savedSaver !== null) setIsDataSaver(savedSaver === 'true');
     } catch {}
   }, []);
+
+  useEffect(() => {
+    const handleBackButton = async () => {
+      if (isFullScreen) {
+        setIsFullScreen(false);
+      } else {
+        CapApp.exitApp();
+      }
+    };
+
+    let backListener = null;
+    try {
+      CapApp.addListener('backButton', handleBackButton).then(l => {
+        backListener = l;
+      });
+    } catch (e) {}
+
+    return () => {
+      if (backListener && backListener.remove) backListener.remove();
+    };
+  }, [isFullScreen]);
 
   const savePins = (ids) => {
     setPinnedIds(ids);
@@ -101,8 +130,9 @@ export default function Home() {
     const q = (searchTerm || 'Bangla Coke Studio Trending').trim();
     try {
       setLoading(true);
-      setRecentQueries(prev => [q, ...prev.filter(item => item.toLowerCase() !== q.toLowerCase())].slice(0, 8));
-      
+      if (setRecentQueries) {
+        setRecentQueries(prev => [q, ...prev.filter(item => item.toLowerCase() !== q.toLowerCase())].slice(0, 8));
+      }
       const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
       const data = await res.json();
       setTracks(Array.isArray(data.tracks) ? data.tracks : []);
@@ -115,6 +145,96 @@ export default function Home() {
 
   useEffect(() => {
     fetchSongs('Bangla Coke Studio Trending');
+  }, []);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const gl = canvas.getContext('webgl');
+    if (!gl) return;
+
+    const vs = `attribute vec2 a_position; varying vec2 v_texCoord; void main() { v_texCoord = a_position * 0.5 + 0.5; gl_Position = vec4(a_position, 0.0, 1.0); }`;
+    const fs = `
+      precision highp float;
+      uniform float u_time;
+      varying vec2 v_texCoord;
+      vec3 permute(vec3 x) { return mod(((x*34.0)+1.0)*x, 289.0); }
+      float snoise(vec2 v){
+        const vec4 C = vec4(0.211324865405187, 0.366025403784439, -0.577350269189626, 0.024390243902439);
+        vec2 i = floor(v + dot(v, C.yy));
+        vec2 x0 = v - i + dot(i, C.xx);
+        vec2 i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+        vec4 x12 = x0.xyxy + C.xxzz;
+        x12.xy -= i1;
+        i = mod(i, 289.0);
+        vec3 p = permute(permute(i.y + vec3(0.0, i1.y, 1.0)) + i.x + vec3(0.0, i1.x, 1.0));
+        vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0);
+        m = m*m; m = m*m;
+        vec3 x = 2.0 * fract(p * C.www) - 1.0;
+        vec3 h = abs(x) - 0.5;
+        vec3 a0 = x - floor(x + 0.5);
+        m *= 1.79284291400159 - 0.85373472095314 * ( a0*a0 + h*h);
+        vec3 g;
+        g.x = a0.x * x0.x + h.x * x0.y;
+        g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+        return 130.0 * dot(m, g);
+      }
+      void main() {
+        vec2 uv = v_texCoord;
+        vec3 obsidian = vec3(0.031, 0.035, 0.047);
+        vec3 crimson = vec3(0.88, 0.11, 0.28);
+        vec3 violet = vec3(0.5, 0.0, 1.0);
+        vec3 turquoise = vec3(0.0, 0.95, 1.0);
+        float n1 = snoise(uv * 1.5 + u_time * 0.15);
+        float n2 = snoise(uv * 2.0 - u_time * 0.1);
+        float n3 = snoise(uv * 0.8 + u_time * 0.05);
+        vec3 color = obsidian;
+        color = mix(color, crimson, smoothstep(0.1, 0.8, n1) * 0.2);
+        color = mix(color, violet, smoothstep(0.2, 0.9, n2) * 0.15);
+        color = mix(color, turquoise, smoothstep(0.3, 1.0, n3) * 0.1);
+        float dist = distance(uv, vec2(0.5));
+        color *= smoothstep(1.2, 0.2, dist);
+        gl_FragColor = vec4(color, 1.0);
+      }
+    `;
+
+    const createShader = (type, src) => {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, src);
+      gl.compileShader(s);
+      return s;
+    };
+
+    const prog = gl.createProgram();
+    gl.attachShader(prog, createShader(gl.VERTEX_SHADER, vs));
+    gl.attachShader(prog, createShader(gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(prog);
+    gl.useProgram(prog);
+
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+
+    const pos = gl.getAttribLocation(prog, 'a_position');
+    gl.enableVertexAttribArray(pos);
+    gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
+
+    const uTime = gl.getUniformLocation(prog, 'u_time');
+    let animationFrameId;
+
+    const render = (t) => {
+      if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        gl.viewport(0, 0, canvas.width, canvas.height);
+      }
+      gl.uniform1f(uTime, t * 0.001);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      animationFrameId = requestAnimationFrame(render);
+    };
+
+    render(0);
+    return () => cancelAnimationFrame(animationFrameId);
   }, []);
 
   const sortedTracks = useMemo(() => {
@@ -141,32 +261,42 @@ export default function Home() {
   }, [allAvailablePlaylists, pinnedIds]);
 
   return (
-    <div className={`min-h-screen flex font-sans selection:bg-indigo-500 selection:text-white pb-32 transition-colors duration-300 ${
-      isDark ? 'bg-[#0b0c10] text-[#e0e2ec]' : 'bg-[#f7f8fb] text-[#1a1b24]'
+    <div className={`relative min-h-screen flex font-sans selection:bg-[#E11D48] selection:text-white pb-32 transition-colors duration-300 ${
+      isDark ? 'bg-[#08090C] text-[#E3E2E6]' : 'bg-[#F8FAFC] text-[#0F172A]'
     }`}>
       
-      {/* Sidebar */}
-      <aside className={`w-64 border-r p-5 flex flex-col justify-between hidden md:flex z-20 transition-colors ${
-        isDark ? 'bg-[#0f1016] border-white/[0.08]' : 'bg-white border-neutral-200 shadow-sm'
+      {/* Background WebGL Shader */}
+      <div className="fixed inset-0 pointer-events-none z-0 opacity-70">
+        <canvas ref={canvasRef} className="w-full h-full block" />
+      </div>
+      <div className={`fixed inset-0 pointer-events-none z-0 ${isDark ? 'bg-[#08090C]/40' : 'bg-white/40'}`} />
+
+      {/* 1. DESKTOP FROSTED GLASS SIDEBAR */}
+      <aside className={`w-64 border-r p-6 flex flex-col justify-between hidden lg:flex z-40 fixed left-0 top-0 bottom-0 backdrop-blur-[32px] saturate-[190%] transition-colors ${
+        isDark ? 'bg-white/5 border-white/10' : 'bg-white/70 border-slate-200/80 shadow-sm'
       }`}>
         <div>
-          <div className="flex items-center space-x-3 mb-8 px-2">
-            <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center font-bold text-white text-xs shadow-md">
-              K
+          {/* Logo */}
+          <div className="flex items-center space-x-3 mb-8 px-1">
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#FFB3B6] to-[#D0BCFF] flex items-center justify-center p-0.5 border border-white/20 shadow-md">
+              <div className="w-full h-full bg-[#08090C] rounded-full flex items-center justify-center">
+                <span className="text-xs font-bold text-white tracking-wider">KY</span>
+              </div>
             </div>
             <div>
-              <span className={`font-bold tracking-wider text-xs uppercase ${isDark ? 'text-white' : 'text-neutral-900'}`}>KYMATIX</span>
-              <p className="text-[9px] text-neutral-400 font-mono tracking-widest">ZERO-LATENCY MATRIX</p>
+              <span className={`font-bold tracking-tight text-lg ${isDark ? 'text-white' : 'text-slate-900'}`}>KYMATIX</span>
+              <p className="text-[10px] text-[#FFB3B6] font-mono tracking-widest uppercase">Studio Glass</p>
             </div>
           </div>
 
-          <nav className="space-y-1 text-xs">
+          {/* Navigation Items */}
+          <nav className="space-y-1.5 text-xs font-medium">
             {[
-              { id: 'home', label: 'Trending Feed', icon: <Flame size={16} /> },
-              { id: 'liked', label: `Liked Songs (${likedSongs.length})`, icon: <Heart size={16} /> },
-              { id: 'history', label: `History (${history.length})`, icon: <Clock size={16} /> },
-              { id: 'playlists', label: `Playlists (${playlists.length})`, icon: <FolderPlus size={16} /> },
-              { id: 'artists', label: `Following (${followedArtists.length})`, icon: <Users size={16} /> },
+              { id: 'home', label: 'Trending Feed', icon: <Flame size={18} /> },
+              { id: 'liked', label: `Liked Songs (${likedSongs.length})`, icon: <Heart size={18} /> },
+              { id: 'history', label: `History (${history.length})`, icon: <Clock size={18} /> },
+              { id: 'playlists', label: `Playlists (${playlists.length})`, icon: <FolderPlus size={18} /> },
+              { id: 'artists', label: `Following (${followedArtists.length})`, icon: <Users size={18} /> },
             ].map((item) => (
               <button
                 key={item.id}
@@ -175,10 +305,14 @@ export default function Home() {
                   setSelectedArtist(null);
                   setSelectedPlaylist(null);
                 }}
-                className={`w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl transition ${
+                className={`w-full flex items-center space-x-3 px-4 py-3 rounded-full transition-all duration-300 ${
                   activeTab === item.id && !selectedArtist
-                    ? isDark ? 'bg-white/[0.08] text-white font-semibold' : 'bg-indigo-50 text-indigo-600 font-semibold'
-                    : isDark ? 'text-neutral-400 hover:text-white hover:bg-white/[0.03]' : 'text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100'
+                    ? isDark 
+                      ? 'bg-[#571BC1]/40 text-[#C4ABFF] border border-[#571BC1]/60 shadow-[0_0_20px_rgba(87,27,193,0.3)] font-semibold' 
+                      : 'bg-indigo-100/80 text-indigo-700 font-semibold'
+                    : isDark 
+                      ? 'text-white/70 hover:text-white hover:bg-white/10' 
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/70'
                 }`}
               >
                 <span>{item.icon}</span>
@@ -186,121 +320,212 @@ export default function Home() {
               </button>
             ))}
           </nav>
+
+          {/* New Playlist Box (Following-এর ঠিক নিচে) */}
+          <div className="mt-4 pt-4 border-t border-white/10">
+            <span className="text-[10px] font-mono uppercase text-white/40 tracking-wider block px-1 mb-2">New Playlist</span>
+            <div className="flex gap-1.5">
+              <input
+                type="text"
+                placeholder="Name..."
+                value={newPlName}
+                onChange={(e) => setNewPlName(e.target.value)}
+                className={`w-full border rounded-xl px-3 py-1.5 text-xs focus:outline-none transition ${
+                  isDark ? 'bg-white/5 border-white/10 text-white focus:border-[#00F2FE]' : 'bg-white border-slate-300 text-slate-900 focus:border-indigo-600'
+                }`}
+              />
+              <button
+                onClick={() => {
+                  if (newPlName.trim()) {
+                    createPlaylist(newPlName);
+                    setNewPlName('');
+                  }
+                }}
+                className="px-3 bg-gradient-to-r from-[#E11D48] to-[#571BC1] text-white rounded-xl text-xs font-semibold shadow-md hover:opacity-90 transition"
+              >
+                +
+              </button>
+            </div>
+          </div>
         </div>
 
-        <div className={`border-t pt-4 ${isDark ? 'border-white/[0.08]' : 'border-neutral-200'}`}>
+        {/* Sidebar Footer Controls */}
+        <div className={`border-t pt-4 flex flex-col gap-2.5 ${isDark ? 'border-white/10' : 'border-slate-200'}`}>
+          
+          {/* 1. Dark/Light Theme Button */}
           <button
-            onClick={() => setIsSettingsOpen(true)}
-            className={`w-full flex items-center justify-between p-2.5 rounded-xl mb-3 text-xs font-semibold transition ${
-              isDark ? 'bg-white/5 hover:bg-white/10 text-neutral-300' : 'bg-neutral-100 hover:bg-neutral-200 text-neutral-800'
-            }`}
+            onClick={() => toggleTheme && toggleTheme()}
+            className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-2xl bg-white/5 border border-white/10 text-xs font-semibold transition hover:bg-white/10 text-white"
+            title="Toggle Theme"
           >
-            <div className="flex items-center gap-2">
-              <Sliders size={14} />
-              <span>Settings</span>
-            </div>
-            <span className="text-[10px] uppercase font-mono text-indigo-500">{theme}</span>
+            {isDark ? (
+              <><Moon size={15} className="text-[#FFB3B6]" /> <span>Dark Theme</span></>
+            ) : (
+              <><Sun size={15} className="text-amber-500" /> <span>Light Theme</span></>
+            )}
           </button>
 
-          <span className="text-[10px] font-mono uppercase text-neutral-400 tracking-wider block mb-2 px-1">New Playlist</span>
-          <div className="flex gap-1.5">
-            <input
-              type="text"
-              placeholder="Name..."
-              value={newPlName}
-              onChange={(e) => setNewPlName(e.target.value)}
-              className={`w-full border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-indigo-500 ${
-                isDark ? 'bg-[#141620] border-white/10 text-neutral-200' : 'bg-neutral-100 border-neutral-300 text-neutral-800'
-              }`}
-            />
+          {/* 2. Separate Layout Switcher Button */}
+          <div className="w-full flex items-center justify-between p-1 rounded-2xl bg-white/5 border border-white/10">
             <button
-              onClick={() => {
-                createPlaylist(newPlName);
-                setNewPlName('');
-              }}
-              className="px-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold transition"
+              onClick={() => toggleLayout && toggleLayout('grid')}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-xl text-xs font-medium transition ${
+                viewLayout === 'grid' ? 'bg-[#571BC1] text-white shadow-md' : 'text-white/40 hover:text-white'
+              }`}
             >
-              +
+              <LayoutGrid size={14} />
+              <span>Grid</span>
+            </button>
+            <button
+              onClick={() => toggleLayout && toggleLayout('list')}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-xl text-xs font-medium transition ${
+                viewLayout === 'list' ? 'bg-[#571BC1] text-white shadow-md' : 'text-white/40 hover:text-white'
+              }`}
+            >
+              <List size={14} />
+              <span>List</span>
             </button>
           </div>
+
+          {/* 3. 2G Data Saver Switch */}
+          <div className="flex items-center justify-between px-2 py-1">
+            <div className="flex flex-col">
+              <span className={`text-xs font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>2G Data Saver</span>
+              <span className="text-[10px] text-white/50">64kbps Low MB</span>
+            </div>
+            <button 
+              onClick={() => {
+                const next = !isDataSaver;
+                setIsDataSaver(next);
+                try { localStorage.setItem('kymatix_data_saver', next.toString()); } catch {}
+              }}
+              className={`w-11 h-6 rounded-full transition-colors relative ${isDataSaver ? 'bg-[#00F2FE]' : 'bg-white/20'}`}
+            >
+              <div className={`w-4 h-4 rounded-full bg-black absolute top-1 transition-transform ${isDataSaver ? 'left-6' : 'left-1'}`} />
+            </button>
+          </div>
+
+          {/* 4. Settings Button (Center-aligned) */}
+          <button
+            onClick={() => setIsSettingsOpen(true)}
+            className={`w-full flex items-center justify-center gap-2 p-2.5 rounded-2xl text-xs font-semibold transition ${
+              isDark ? 'bg-white/5 hover:bg-white/10 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-800'
+            }`}
+          >
+            <Sliders size={14} />
+            <span>Settings</span>
+          </button>
         </div>
       </aside>
 
-      {/* Main Viewport */}
-      <div className="flex-1 flex flex-col min-w-0">
+      {/* 2. MAIN VIEWPORT & FLOATING GLASS SEARCH HEADER */}
+      <div className="flex-1 lg:ml-64 flex flex-col min-w-0 z-10">
         
-        {/* Search Header */}
-        <header className={`px-8 py-4 border-b flex flex-col sm:flex-row items-center justify-between gap-4 z-10 backdrop-blur-md ${
-          isDark ? 'bg-[#0b0c10]/80 border-white/[0.08]' : 'bg-white/80 border-neutral-200'
-        }`}>
-          <div className="relative w-full sm:w-96">
-            <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-400" />
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  setSelectedArtist(null);
-                  fetchSongs(query);
-                }
-              }}
-              placeholder="Search songs, artists, trends..."
-              className={`w-full text-xs border rounded-full pl-9 pr-24 py-2.5 focus:outline-none focus:border-indigo-500 transition ${
-                isDark ? 'bg-[#13151e] text-neutral-200 border-white/10' : 'bg-neutral-100 text-neutral-900 border-neutral-300'
-              }`}
-            />
-            <button
-              onClick={() => {
-                setSelectedArtist(null);
-                fetchSongs(query);
-              }}
-              className="absolute right-1 top-1 bottom-1 px-4 bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-semibold rounded-full transition"
-            >
-              Search
-            </button>
-          </div>
-
-          <div className="flex items-center space-x-3">
-            <div className={`flex items-center p-1 rounded-xl border ${isDark ? 'bg-white/5 border-white/10' : 'bg-neutral-100 border-neutral-200'}`}>
-              <button
-                onClick={() => toggleLayout('grid')}
-                className={`p-1.5 rounded-lg transition ${viewLayout === 'grid' ? 'bg-indigo-600 text-white' : 'text-neutral-400'}`}
-                title="Grid / Box Layout"
-              >
-                <LayoutGrid size={15} />
+        {/* Top Header Floating Search Bar (Brand Name Removed) */}
+        <header className="fixed top-4 left-1/2 -translate-x-1/2 z-50 w-full px-4 lg:px-0 lg:w-[calc(100%-256px)] lg:ml-32 pointer-events-none">
+          <div className="bg-white/5 backdrop-blur-[40px] saturate-[220%] rounded-full mx-auto max-w-2xl border border-white/15 flex items-center justify-between px-6 py-3 shadow-[0_20px_40px_rgba(0,0,0,0.4)] pointer-events-auto transition-shadow hover:shadow-[0_20px_50px_rgba(0,0,0,0.5)]">
+            <div className="flex-1 flex items-center gap-3 text-white/60 focus-within:ring-2 ring-[#571BC1] rounded-full px-3 py-1 transition-all">
+              <Search size={18} className="text-white/40" />
+              <input 
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    setSelectedArtist(null);
+                    fetchSongs(query);
+                  }
+                }}
+                placeholder="Search Kymatix..." 
+                className="bg-transparent border-none outline-none text-white text-sm focus:ring-0 w-full placeholder-white/40"
+              />
+            </div>
+            
+            <div className="flex items-center gap-4 ml-4">
+              <button className="text-white/60 hover:text-[#FFB3B6] transition-colors">
+                <Bell size={20} />
               </button>
-              <button
-                onClick={() => toggleLayout('list')}
-                className={`p-1.5 rounded-lg transition ${viewLayout === 'list' ? 'bg-indigo-600 text-white' : 'text-neutral-400'}`}
-                title="List Layout"
-              >
-                <List size={15} />
+              <button className="text-white/60 hover:text-[#FFB3B6] transition-colors">
+                <User size={20} />
               </button>
             </div>
           </div>
         </header>
 
-        {/* Content Body */}
-        <main className="flex-1 px-8 pt-6 z-10 overflow-y-auto no-scrollbar">
+        {/* Content Body Canvas */}
+        <main className="flex-1 px-4 lg:px-12 pt-32 pb-24 overflow-y-auto no-scrollbar max-w-7xl w-full mx-auto">
           
           {selectedArtist ? (
             <ArtistPage artistName={selectedArtist} onBack={() => setSelectedArtist(null)} />
           ) : activeTab === 'home' ? (
-            <div>
-              {/* TOP 6 PINNED QUICK ACCESS BOXES */}
-              <div className="mb-8">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-[11px] font-mono tracking-wider uppercase text-neutral-400 flex items-center gap-1.5 font-semibold">
-                    <Pin size={12} className="text-indigo-500" /> Quick Access ({pinnedPlaylists.length}/6 Pinned)
+            <div className="space-y-12">
+              
+              {/* Featured Release Hero Card */}
+              <section className="relative w-full rounded-[32px] overflow-hidden glass-panel group transition-transform duration-500 hover:scale-[1.01] border border-white/10 bg-white/5 backdrop-blur-[32px] shadow-[0_20px_50px_rgba(0,0,0,0.4)]">
+                <div className="absolute inset-0 bg-gradient-to-r from-[#E11D48]/20 to-[#571BC1]/20 mix-blend-overlay" />
+                <div 
+                  className="absolute inset-0 bg-cover bg-center opacity-40 group-hover:opacity-60 transition-opacity duration-700 blur-[2px] group-hover:blur-0 scale-105 group-hover:scale-100"
+                  style={{ backgroundImage: `url(${sortedTracks[0]?.thumbnail || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=600&auto=format&fit=crop'})` }}
+                />
+                <div className="relative z-10 p-8 md:p-14 flex flex-col justify-end min-h-[360px] bg-gradient-to-t from-[#08090C] via-[#08090C]/50 to-transparent">
+                  <span className="inline-block px-4 py-1.5 rounded-full bg-white/10 backdrop-blur-md border border-white/20 text-white text-[11px] font-bold w-max mb-4 uppercase tracking-widest">
+                    Featured Spotlight
                   </span>
+                  <h2 className="text-3xl md:text-5xl font-extrabold text-white leading-tight drop-shadow-2xl truncate">
+                    {sortedTracks[0]?.title || 'Echoes of Silica'}
+                  </h2>
+                  <p className="text-base text-white/80 mt-2 max-w-xl font-light">
+                    {sortedTracks[0]?.artist || 'Void Walker'} • Spatial audio stream with liquid glass fidelity.
+                  </p>
+                  <div className="mt-8 flex gap-4">
+                    <button 
+                      onClick={() => sortedTracks[0] && playTrack(sortedTracks[0], { isPlaylist: false, trackList: sortedTracks })}
+                      className="bg-gradient-to-r from-[#E11D48] to-[#571BC1] text-white px-8 py-3 rounded-full text-xs font-semibold flex items-center gap-2 shadow-[0_0_30px_rgba(225,29,72,0.4)] hover:shadow-[0_0_40px_rgba(225,29,72,0.6)] transition-all relative overflow-hidden"
+                    >
+                      <Play size={16} className="fill-white" />
+                      <span>Play Now</span>
+                    </button>
+                    {sortedTracks[0] && (
+                      <button 
+                        onClick={() => toggleLike(sortedTracks[0])}
+                        className="bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 text-white px-6 py-3 rounded-full text-xs font-semibold flex items-center gap-2 transition-colors"
+                      >
+                        <Heart size={16} className={likedSongs.some(t => t.id === sortedTracks[0].id) ? 'text-[#FF007F] fill-[#FF007F]' : ''} />
+                        <span>Add to Library</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </section>
+
+              {/* Bento Grid: Curated For You */}
+              <div>
+                <div className="mb-6 flex items-end justify-between">
+                  <h3 className="text-2xl font-bold text-white tracking-tight">Curated for You</h3>
+                  <button onClick={() => fetchSongs('Trending Global')} className="text-[#FFB3B6] text-xs font-semibold hover:underline">
+                    See All
+                  </button>
                 </div>
 
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                {loading ? (
+                  <div className={viewLayout === 'grid' ? "grid grid-cols-2 md:grid-cols-4 gap-6" : "space-y-2"}>
+                    {[...Array(8)].map((_, i) => (
+                      <div key={i} className="rounded-[20px] p-4 space-y-3 animate-pulse bg-white/5 border border-white/10 aspect-square" />
+                    ))}
+                  </div>
+                ) : (
+                  renderTracksView(sortedTracks, { isPlaylist: false, trackList: sortedTracks })
+                )}
+              </div>
+
+              {/* Jump Back In: 6 Playlists (3 on top row, 3 on bottom row) */}
+              <section className="flex flex-col gap-4">
+                <h3 className="text-xl font-bold text-white tracking-tight">Jump Back In</h3>
+                <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
                   {pinnedPlaylists.map((pl) => {
                     const isLoved = pl.isLoved;
                     return (
-                      <div
+                      <button
                         key={pl.id}
                         onClick={() => {
                           if (isLoved) {
@@ -310,135 +535,52 @@ export default function Home() {
                             setActiveTab('playlists');
                           }
                         }}
-                        className={`group relative flex items-center space-x-3 rounded-xl p-2.5 border cursor-pointer transition duration-200 overflow-hidden ${
-                          isDark 
-                            ? 'bg-[#13151f] hover:bg-[#181a27] border-white/5 hover:border-white/20' 
-                            : 'bg-white hover:bg-neutral-50 border-neutral-200 shadow-sm'
-                        }`}
+                        className="bg-white/5 backdrop-blur-[32px] border border-white/10 rounded-2xl p-3.5 flex items-center gap-3.5 hover:bg-white/10 transition-colors group text-left w-full"
                       >
-                        <div className={`w-11 h-11 rounded-lg flex items-center justify-center font-bold text-white shadow-md flex-shrink-0 ${
-                          isLoved
-                            ? 'bg-gradient-to-tr from-pink-500 to-rose-600'
-                            : 'bg-gradient-to-tr from-indigo-500 to-purple-600'
+                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-bold text-white shrink-0 shadow-md ${
+                          isLoved ? 'bg-gradient-to-tr from-[#E11D48] to-[#FF007F]' : 'bg-gradient-to-tr from-[#571BC1] to-[#00F2FE]'
                         }`}>
                           {isLoved ? <Heart size={18} className="fill-white" /> : <Music2 size={18} />}
                         </div>
-
-                        <div className="truncate flex-1">
-                          <h4 className="text-xs font-semibold truncate group-hover:text-indigo-500 transition">
-                            {pl.name}
-                          </h4>
-                          <p className="text-[10px] text-neutral-400 mt-0.5">{pl.count} tracks</p>
+                        <div className="flex flex-col overflow-hidden flex-1">
+                          <span className="text-xs font-semibold text-white truncate group-hover:text-[#FFB3B6] transition-colors">{pl.name}</span>
+                          <span className="text-[10px] text-white/50 truncate mt-0.5">{pl.count} tracks</span>
                         </div>
-
-                        <div
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (pl.tracks && pl.tracks.length > 0) {
-                              playTrack(pl.tracks[0], { isPlaylist: true, trackList: pl.tracks, playlistId: pl.id });
-                            }
-                          }}
-                          className="opacity-0 group-hover:opacity-100 transition p-2 rounded-full bg-indigo-600 text-white shadow-md hover:scale-105"
-                          title="Play Playlist"
-                        >
-                          <Play size={12} className="translate-x-0.5 fill-white" />
-                        </div>
-                      </div>
+                      </button>
                     );
                   })}
                 </div>
-              </div>
-
-              {/* DAILY TRENDING HEADER */}
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6 border-b pb-4 border-white/[0.08]">
-                <div className="flex items-center gap-2">
-                  <Flame size={18} className="text-amber-500" />
-                  <h2 className="text-xs font-bold tracking-widest uppercase text-neutral-400">
-                    Daily Trending & Top Streams ({sortedTracks.length})
-                  </h2>
-                </div>
-
-                <div className="flex items-center space-x-2">
-                  <span className="text-[10px] font-mono uppercase text-neutral-400">Sort Trending:</span>
-                  <select
-                    value={trendingSort}
-                    onChange={(e) => setTrendingSort(e.target.value)}
-                    className={`text-xs border rounded-xl px-3 py-1.5 focus:outline-none focus:border-indigo-500 cursor-pointer ${
-                      isDark ? 'bg-[#141620] text-neutral-200 border-white/10' : 'bg-white text-neutral-800 border-neutral-300'
-                    }`}
-                  >
-                    <option value="daily_viral">🔥 Today's Viral Hot 50</option>
-                    <option value="most_streamed">🎧 Most Listened Streams</option>
-                    <option value="new_trending">🚀 New & Trending Releases</option>
-                  </select>
-                </div>
-              </div>
-
-              {loading ? (
-                <div className={viewLayout === 'grid' ? "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 gap-4" : "space-y-2"}>
-                  {[...Array(8)].map((_, i) => (
-                    <div key={i} className={`rounded-2xl p-3.5 space-y-3 animate-pulse ${isDark ? 'bg-[#12141c] border border-white/5' : 'bg-neutral-200/60'}`}>
-                      <div className="w-full aspect-square bg-white/5 rounded-xl" />
-                      <div className="h-3 bg-white/5 rounded w-3/4" />
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                renderTracksView(sortedTracks, { isPlaylist: false, trackList: sortedTracks })
-              )}
+              </section>
             </div>
           ) : activeTab === 'liked' ? (
             <div>
-              <h2 className="text-xs font-semibold tracking-widest text-neutral-400 uppercase mb-6">Liked Songs ({likedSongs.length})</h2>
+              <h2 className="text-xs font-semibold tracking-widest text-white/60 uppercase mb-6">Liked Songs ({likedSongs.length})</h2>
               {likedSongs.length === 0 ? (
-                <p className="text-neutral-500 text-xs font-mono py-12">NO LIKED TRACKS SAVED.</p>
+                <p className="text-white/40 text-xs font-mono py-12 text-center">NO LIKED TRACKS SAVED.</p>
               ) : (
                 renderTracksView(likedSongs, { isPlaylist: true, trackList: likedSongs, playlistId: 'liked' })
               )}
             </div>
           ) : activeTab === 'history' ? (
             <div>
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6 border-b pb-4 border-white/[0.08]">
-                <div>
-                  <h2 className="text-xs font-semibold tracking-widest text-neutral-400 uppercase flex items-center gap-2">
-                    <Clock size={16} className="text-indigo-400" />
-                    Listening History ({history.length})
-                  </h2>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-3">
-                  <div className="flex items-center space-x-2">
-                    <CalendarClock size={14} className="text-neutral-400" />
-                    <span className="text-[10px] font-mono uppercase text-neutral-400">Auto Clear:</span>
-                    <select
-                      value={historyRetention}
-                      onChange={(e) => changeHistoryRetention(e.target.value)}
-                      className={`text-xs border rounded-xl px-2.5 py-1.5 focus:outline-none focus:border-indigo-500 cursor-pointer ${
-                        isDark ? 'bg-[#141620] text-neutral-200 border-white/10' : 'bg-white text-neutral-800 border-neutral-300'
-                      }`}
-                    >
-                      <option value="never">Never (Keep Forever)</option>
-                      <option value="1day">Everyday (After 24h)</option>
-                      <option value="7days">Every 1 Week (7 Days)</option>
-                      <option value="30days">Every 1 Month (30 Days)</option>
-                      <option value="365days">Every 1 Year (365 Days)</option>
-                    </select>
-                  </div>
-
-                  {history.length > 0 && (
-                    <button
-                      onClick={() => setIsConfirmClearOpen(true)}
-                      className="px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-semibold flex items-center gap-1.5 transition active:scale-95"
-                    >
-                      <Trash2 size={13} />
-                      <span>Clear Now</span>
-                    </button>
-                  )}
-                </div>
+              <div className="flex items-center justify-between mb-6 border-b pb-4 border-white/10">
+                <h2 className="text-xs font-semibold tracking-widest text-white/60 uppercase flex items-center gap-2">
+                  <Clock size={16} className="text-[#00F2FE]" />
+                  Listening History ({history.length})
+                </h2>
+                {history.length > 0 && (
+                  <button
+                    onClick={() => clearHistoryNow && clearHistoryNow()}
+                    className="px-3 py-1.5 rounded-full bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-semibold flex items-center gap-1.5 transition"
+                  >
+                    <Trash2 size={13} />
+                    <span>Clear Now</span>
+                  </button>
+                )}
               </div>
 
               {history.length === 0 ? (
-                <p className="text-neutral-500 text-xs font-mono py-12 text-center">NO PREVIOUS STREAMS FOUND.</p>
+                <p className="text-white/40 text-xs font-mono py-12 text-center">NO PREVIOUS STREAMS FOUND.</p>
               ) : (
                 renderTracksView(history, { isPlaylist: false, trackList: history })
               )}
@@ -447,30 +589,28 @@ export default function Home() {
             <div>
               {!selectedPlaylist ? (
                 <div>
-                  <h2 className="text-xs font-semibold tracking-widest text-neutral-400 uppercase mb-6">All Playlists</h2>
+                  <h2 className="text-xs font-semibold tracking-widest text-white/60 uppercase mb-6">All Playlists</h2>
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
                     {playlists.map((pl) => (
                       <div
                         key={pl.id}
-                        className={`group relative border p-5 rounded-2xl cursor-pointer transition ${
-                          isDark ? 'bg-[#12141c] border-white/5 hover:border-white/20' : 'bg-white border-neutral-200 hover:border-indigo-400 shadow-sm'
-                        }`}
+                        className="group relative border border-white/10 bg-white/5 backdrop-blur-[32px] p-5 rounded-2xl cursor-pointer hover:border-white/30 transition"
                       >
                         <div 
                           onClick={() => setSelectedPlaylist(pl)}
-                          className="w-full aspect-square bg-indigo-600/10 border border-indigo-500/20 rounded-xl flex items-center justify-center text-indigo-500 text-2xl mb-3"
+                          className="w-full aspect-square bg-[#571BC1]/20 border border-[#571BC1]/30 rounded-xl flex items-center justify-center text-[#C4ABFF] text-2xl mb-3"
                         >
                           <FolderPlus size={28} />
                         </div>
-                        <h4 onClick={() => setSelectedPlaylist(pl)} className="font-semibold text-xs">{pl.name}</h4>
+                        <h4 onClick={() => setSelectedPlaylist(pl)} className="font-semibold text-xs text-white">{pl.name}</h4>
                         <div className="flex items-center justify-between mt-1">
-                          <p className="text-[10px] text-neutral-400">{pl.tracks.length} tracks</p>
+                          <p className="text-[10px] text-white/40">{pl.tracks.length} tracks</p>
                           <button
                             onClick={() => togglePin(pl.id)}
-                            className={`p-1 text-xs rounded transition ${pinnedIds.includes(pl.id) ? 'text-indigo-500 font-bold' : 'text-neutral-500 hover:text-white'}`}
-                            title="Pin to Top Boxes"
+                            className={`p-1 text-xs rounded transition ${pinnedIds.includes(pl.id) ? 'text-[#00F2FE]' : 'text-white/40 hover:text-white'}`}
+                            title="Pin to Quick Access"
                           >
-                            <Pin size={12} className={pinnedIds.includes(pl.id) ? 'fill-indigo-500' : ''} />
+                            <Pin size={12} className={pinnedIds.includes(pl.id) ? 'fill-[#00F2FE]' : ''} />
                           </button>
                         </div>
                       </div>
@@ -479,7 +619,7 @@ export default function Home() {
                 </div>
               ) : (
                 <div>
-                  <button onClick={() => setSelectedPlaylist(null)} className="text-xs text-indigo-500 mb-4 font-semibold">
+                  <button onClick={() => setSelectedPlaylist(null)} className="text-xs text-[#00F2FE] mb-4 font-semibold">
                     ← Back to Playlists
                   </button>
                   <h2 className="text-sm font-semibold mb-6">{selectedPlaylist.name}</h2>
@@ -489,22 +629,20 @@ export default function Home() {
             </div>
           ) : activeTab === 'artists' ? (
             <div>
-              <h2 className="text-xs font-semibold tracking-widest text-neutral-400 uppercase mb-6">Following</h2>
+              <h2 className="text-xs font-semibold tracking-widest text-white/60 uppercase mb-6">Following</h2>
               {followedArtists.length === 0 ? (
-                <p className="text-neutral-500 text-xs font-mono py-12">NO ARTISTS FOLLOWED.</p>
+                <p className="text-white/40 text-xs font-mono py-12 text-center">NO ARTISTS FOLLOWED.</p>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
                   {followedArtists.map((art, idx) => (
                     <div
                       key={idx}
                       onClick={() => setSelectedArtist(art)}
-                      className={`border p-4 rounded-2xl flex items-center justify-between cursor-pointer transition ${
-                        isDark ? 'bg-[#12141c] border-white/5 hover:border-white/20' : 'bg-white border-neutral-200 hover:border-indigo-400'
-                      }`}
+                      className="border border-white/10 bg-white/5 backdrop-blur-[32px] p-4 rounded-2xl flex items-center justify-between cursor-pointer hover:border-white/30 transition"
                     >
                       <div>
-                        <h4 className="font-semibold text-xs hover:text-indigo-500">{art}</h4>
-                        <span className="text-[10px] text-neutral-400">View Artist Profile →</span>
+                        <h4 className="font-semibold text-xs text-white hover:text-[#FFB3B6]">{art}</h4>
+                        <span className="text-[10px] text-white/40">View Profile →</span>
                       </div>
                     </div>
                   ))}
@@ -516,45 +654,42 @@ export default function Home() {
         </main>
       </div>
 
-      {/* CONFIRMATION POPUP MODAL */}
-      {isConfirmClearOpen && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className={`w-full max-w-sm rounded-3xl p-6 border shadow-2xl transition-all ${
-            isDark ? 'bg-[#13151f] border-white/10 text-white' : 'bg-white border-neutral-200 text-neutral-900'
-          }`}>
-            <div className="w-12 h-12 rounded-full bg-rose-500/10 border border-rose-500/20 text-rose-500 flex items-center justify-center mx-auto mb-4">
-              <AlertTriangle size={24} />
-            </div>
+      {/* 3. MOBILE BOTTOM NAVIGATION DOCK */}
+      <nav className="fixed bottom-0 w-full z-40 flex lg:hidden justify-around items-center px-4 pb-[env(safe-area-inset-bottom,20px)] h-16 bg-[#1F1F23]/80 backdrop-blur-[32px] border-t border-white/10 shadow-[0_-10px_32px_rgba(0,0,0,0.2)]">
+        <button 
+          onClick={() => { setActiveTab('home'); setSelectedArtist(null); setSelectedPlaylist(null); }}
+          className={`flex flex-col items-center justify-center w-full h-full transition-transform group ${activeTab === 'home' ? 'text-[#FFB3B6]' : 'text-white/40 hover:text-white'}`}
+        >
+          <HomeIcon size={22} className={activeTab === 'home' ? 'fill-current' : ''} />
+          <span className="text-[10px] mt-1 font-semibold">Home</span>
+        </button>
 
-            <h3 className="text-sm font-bold text-center mb-1">Clear Listening History?</h3>
-            <p className="text-xs text-neutral-400 text-center mb-6">
-              Are you sure you want to delete all recently played tracks? This action cannot be undone.
-            </p>
+        <button 
+          onClick={() => { setActiveTab('liked'); setSelectedArtist(null); setSelectedPlaylist(null); }}
+          className={`flex flex-col items-center justify-center w-full h-full transition-transform group ${activeTab === 'liked' ? 'text-[#FFB3B6]' : 'text-white/40 hover:text-white'}`}
+        >
+          <Heart size={22} className={activeTab === 'liked' ? 'fill-current' : ''} />
+          <span className="text-[10px] mt-1 font-semibold">Liked</span>
+        </button>
 
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                onClick={() => setIsConfirmClearOpen(false)}
-                className={`py-2.5 rounded-xl text-xs font-semibold border transition ${
-                  isDark ? 'bg-white/5 border-white/10 hover:bg-white/10 text-neutral-300' : 'bg-neutral-100 border-neutral-200 hover:bg-neutral-200 text-neutral-800'
-                }`}
-              >
-                Cancel
-              </button>
+        <button 
+          onClick={() => { setActiveTab('playlists'); setSelectedArtist(null); setSelectedPlaylist(null); }}
+          className={`flex flex-col items-center justify-center w-full h-full transition-transform group ${activeTab === 'playlists' ? 'text-[#FFB3B6]' : 'text-white/40 hover:text-white'}`}
+        >
+          <LibraryBig size={22} className={activeTab === 'playlists' ? 'fill-current' : ''} />
+          <span className="text-[10px] mt-1 font-semibold">Library</span>
+        </button>
 
-              <button
-                onClick={() => {
-                  clearHistoryNow();
-                  setIsConfirmClearOpen(false);
-                }}
-                className="py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-lg shadow-rose-600/30 transition active:scale-95"
-              >
-                Yes, Clear All
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+        <button 
+          onClick={() => setIsSettingsOpen(true)}
+          className="flex flex-col items-center justify-center w-full h-full text-white/40 hover:text-white transition-transform group"
+        >
+          <Settings size={22} />
+          <span className="text-[10px] mt-1 font-semibold">Settings</span>
+        </button>
+      </nav>
 
+      {/* Global Player Components */}
       <TrackInfoSidebar />
       <PlayerBar />
     </div>
@@ -563,30 +698,30 @@ export default function Home() {
   function renderTracksView(trackList, playContext) {
     if (viewLayout === 'list') {
       return (
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           {trackList.map((track, idx) => {
             const active = currentTrack?.id === track.id;
             const isLiked = likedSongs.some((t) => t.id === track.id);
 
             return (
               <div
-                key={track.id}
-                className={`group flex items-center justify-between p-2.5 rounded-xl border transition ${
+                key={track.id || idx}
+                className={`group flex items-center justify-between p-3 rounded-2xl border backdrop-blur-[32px] transition-all duration-300 ${
                   active
-                    ? 'bg-indigo-600/15 border-indigo-500/50'
-                    : isDark ? 'bg-[#11131a]/60 border-white/5 hover:border-white/15 hover:bg-white/[0.04]' : 'bg-white border-neutral-200 hover:border-neutral-300'
+                    ? 'bg-[#571BC1]/30 border-[#571BC1]/50 shadow-md'
+                    : isDark ? 'bg-white/5 border-white/5 hover:border-white/20 hover:bg-white/10' : 'bg-white border-slate-200 shadow-sm'
                 }`}
               >
                 <div
                   className="flex items-center space-x-3.5 flex-1 cursor-pointer truncate"
-                  onClick={() => (active ? togglePlay() : playTrack(track, playContext))}
+                  onClick={() => (active ? togglePlay && togglePlay() : playTrack(track, playContext))}
                 >
-                  <span className="w-5 text-center text-xs font-mono text-neutral-400">
-                    {active && isPlaying ? <Play size={12} className="text-indigo-500 inline fill-current" /> : idx + 1}
+                  <span className="w-5 text-center text-xs font-mono text-white/40">
+                    {active && isPlaying ? <Play size={12} className="text-[#00F2FE] inline fill-current" /> : idx + 1}
                   </span>
-                  <img src={track.thumbnail} alt="" className="w-10 h-10 rounded-lg object-cover" />
+                  <img src={track.thumbnail} alt="" className="w-11 h-11 rounded-xl object-cover shadow-sm" />
                   <div className="truncate">
-                    <h4 className={`text-xs font-medium truncate ${active ? 'text-indigo-500 font-bold' : ''}`}>
+                    <h4 className={`text-xs font-semibold truncate ${active ? 'text-[#FFB3B6]' : 'text-white'}`}>
                       {track.title}
                     </h4>
                     <p
@@ -594,25 +729,25 @@ export default function Home() {
                         e.stopPropagation();
                         setSelectedArtist(track.artist);
                       }}
-                      className="text-[10px] text-neutral-400 hover:text-indigo-500 truncate mt-0.5"
+                      className="text-[10px] text-white/40 hover:text-[#00F2FE] truncate mt-0.5"
                     >
                       {track.artist}
                     </p>
                   </div>
                 </div>
 
-                <div className="flex items-center space-x-4 text-xs text-neutral-400 font-mono">
+                <div className="flex items-center space-x-4 text-xs text-white/40 font-mono">
                   <button
                     onClick={() => toggleLike(track)}
-                    className="text-neutral-400 hover:text-rose-500 transition"
+                    className="hover:text-rose-500 transition"
                   >
-                    <Heart size={14} className={isLiked ? 'fill-rose-500 text-rose-500' : ''} />
+                    <Heart size={15} className={isLiked ? 'fill-[#FF007F] text-[#FF007F]' : ''} />
                   </button>
                   <button
                     onClick={() => addToQueue(track)}
-                    className="text-neutral-400 hover:text-indigo-500 transition"
+                    className="hover:text-[#00F2FE] transition"
                   >
-                    <Plus size={14} />
+                    <Plus size={15} />
                   </button>
                   <span className="text-[11px]">{formatDuration(track.duration)}</span>
                 </div>
@@ -624,99 +759,73 @@ export default function Home() {
     }
 
     return (
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 gap-4">
-        {trackList.map((track) => {
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+        {trackList.map((track, idx) => {
           const active = currentTrack?.id === track.id;
           const isLiked = likedSongs.some((t) => t.id === track.id);
           const isFollowed = followedArtists.includes(track.artist);
 
           return (
             <div
-              key={track.id}
-              className={`group relative border rounded-2xl p-3 transition-all duration-200 flex flex-col justify-between ${
-                active
-                  ? 'border-indigo-500 shadow-md'
-                  : isDark ? 'bg-[#11131a] border-white/[0.06] hover:border-white/20' : 'bg-white border-neutral-200 hover:border-neutral-300 shadow-sm'
+              key={track.id || idx}
+              className={`relative group rounded-[20px] overflow-hidden aspect-square border border-white/10 bg-white/5 backdrop-blur-[32px] transition-all duration-300 ${
+                active ? 'ring-2 ring-[#00F2FE]' : ''
               }`}
             >
-              <div className="relative aspect-square w-full rounded-xl overflow-hidden mb-3 bg-neutral-900">
-                <img src={track.thumbnail} alt={track.title} className="w-full h-full object-cover transition duration-300 group-hover:scale-105" />
-                
-                <div
-                  onClick={() => (active ? togglePlay() : playTrack(track, playContext))}
-                  className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition duration-200 cursor-pointer"
-                >
-                  <div className="w-10 h-10 rounded-full bg-neutral-100 text-neutral-900 flex items-center justify-center font-bold text-sm shadow-xl hover:scale-105 transition">
-                    {active && isPlaying ? <Pause size={16} /> : <Play size={16} className="translate-x-0.5 fill-current" />}
+              <img 
+                src={track.thumbnail} 
+                alt={track.title} 
+                className="absolute inset-0 w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity duration-500 scale-100 group-hover:scale-105 transition-transform ease-out" 
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-60 group-hover:opacity-80 transition-opacity" />
+
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleLike(track);
+                }}
+                className="absolute top-3 right-3 p-2 rounded-full bg-black/40 backdrop-blur-md text-white/70 hover:text-[#FF007F] transition"
+              >
+                <Heart size={14} className={isLiked ? 'fill-[#FF007F] text-[#FF007F]' : ''} />
+              </button>
+
+              <div className="absolute bottom-3 left-3 right-3">
+                <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-xl p-2.5">
+                  <h4 
+                    onClick={() => playTrack(track, playContext)}
+                    className="font-semibold text-white truncate text-xs cursor-pointer hover:underline"
+                  >
+                    {track.title}
+                  </h4>
+                  <div className="flex items-center justify-between mt-0.5">
+                    <p 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedArtist(track.artist);
+                      }}
+                      className="text-[10px] text-white/70 truncate cursor-pointer hover:text-[#00F2FE]"
+                    >
+                      {track.artist}
+                    </p>
+                    <button
+                      onClick={() => toggleFollowArtist(track.artist)}
+                      className={`text-[8px] px-1.5 py-0.5 rounded-full border transition ${
+                        isFollowed ? 'border-[#00F2FE] text-[#00F2FE] bg-[#00F2FE]/10' : 'border-white/20 text-white/60'
+                      }`}
+                    >
+                      {isFollowed ? 'Following' : '+ Follow'}
+                    </button>
                   </div>
                 </div>
-
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleLike(track);
-                  }}
-                  className="absolute top-2 right-2 p-1.5 rounded-full bg-black/50 text-neutral-400 hover:text-rose-500 transition"
-                >
-                  <Heart size={13} className={isLiked ? 'fill-rose-500 text-rose-500' : ''} />
-                </button>
               </div>
 
-              <div>
-                <h3
-                  onClick={() => playTrack(track, playContext)}
-                  className="text-xs font-semibold truncate hover:text-indigo-500 cursor-pointer transition"
+              <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none">
+                <button 
+                  onClick={() => (active ? togglePlay && togglePlay() : playTrack(track, playContext))}
+                  className="w-12 h-12 rounded-full bg-white/20 backdrop-blur-xl flex items-center justify-center text-white border border-white/40 shadow-lg hover:scale-110 transition-transform pointer-events-auto"
                 >
-                  {track.title}
-                </h3>
-                
-                <div className="flex items-center justify-between mt-1">
-                  <p
-                    onClick={() => setSelectedArtist(track.artist)}
-                    className="text-[10px] text-neutral-400 truncate max-w-[110px] hover:text-indigo-500 cursor-pointer transition"
-                  >
-                    {track.artist}
-                  </p>
-                  <button
-                    onClick={() => toggleFollowArtist(track.artist)}
-                    className={`text-[9px] px-2 py-0.5 rounded-full border transition ${
-                      isFollowed
-                        ? 'border-indigo-500/40 text-indigo-500 bg-indigo-500/10'
-                        : isDark ? 'border-white/10 text-neutral-400' : 'border-neutral-300 text-neutral-600'
-                    }`}
-                  >
-                    {isFollowed ? 'Following' : '+ Follow'}
-                  </button>
-                </div>
-
-                <div className={`mt-2.5 pt-2 border-t flex items-center justify-between text-[10px] ${isDark ? 'border-white/5' : 'border-neutral-100'}`}>
-                  <button
-                    onClick={() => addToQueue(track)}
-                    className="text-neutral-400 hover:text-indigo-500 transition"
-                  >
-                    + Queue
-                  </button>
-
-                  {playlists.length > 0 && (
-                    <select
-                      onChange={(e) => {
-                        if (e.target.value) {
-                          addToPlaylist(e.target.value, track);
-                          e.target.value = '';
-                        }
-                      }}
-                      defaultValue=""
-                      className={`text-[10px] focus:outline-none cursor-pointer bg-transparent text-neutral-400 hover:text-indigo-500`}
-                    >
-                      <option value="" disabled>+ List</option>
-                      {playlists.map((pl) => (
-                        <option key={pl.id} value={pl.id} className={isDark ? 'bg-[#141620] text-neutral-200' : 'bg-white text-neutral-800'}>
-                          {pl.name}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </div>
+                  {active && isPlaying ? <Pause size={20} className="fill-white" /> : <Play size={20} className="fill-white translate-x-0.5" />}
+                </button>
               </div>
             </div>
           );

@@ -19,8 +19,7 @@ import {
   VolumeX, 
   ListMusic, 
   Mic2,
-  Zap,
-  Settings
+  Cast
 } from 'lucide-react';
 
 function formatTime(sec) {
@@ -47,21 +46,16 @@ export default function PlayerBar() {
     setIsShuffle,
     repeatMode,
     setRepeatMode,
-    is2GMode,
-    setIs2GMode,
-    theme,
-    likedSongs,
+    likedSongs = [],
     toggleLike,
     setIsModalOpen,
     setIsQueueOpen,
-    setIsSettingsOpen,
     setSelectedArtist
   } = usePlayer();
 
   if (!currentTrack) return null;
 
   const isLiked = likedSongs.some(t => t.id === currentTrack.id);
-  const isDark = theme === 'dark';
 
   const cycleRepeat = () => {
     if (repeatMode === 'off') setRepeatMode('all');
@@ -71,145 +65,133 @@ export default function PlayerBar() {
 
   return (
     <>
-      <div className={`fixed bottom-5 left-1/2 -translate-x-1/2 w-[95%] max-w-4xl backdrop-blur-2xl border rounded-full px-5 py-2.5 flex items-center justify-between shadow-2xl z-40 transition-all duration-300 ${
-        isDark 
-          ? 'bg-[#101118]/90 border-white/10 text-white' 
-          : 'bg-white/95 border-neutral-200 text-neutral-900 shadow-neutral-300/40'
-      }`}>
-        
-        {/* Left: Track Info */}
-        <div className="flex items-center space-x-3 w-1/4 min-w-[150px]">
-          <img
-            src={currentTrack.thumbnail}
-            alt={currentTrack.title}
-            className="w-10 h-10 rounded-full object-cover border border-white/10 shadow-sm"
-          />
-          <div className="truncate">
-            <h4 className={`text-xs font-semibold truncate cursor-default ${isDark ? 'text-neutral-100' : 'text-neutral-900'}`}>
-              {currentTrack.title}
-            </h4>
-            <p
-              onClick={() => setSelectedArtist(currentTrack.artist)}
-              className="text-[10px] text-neutral-400 truncate hover:text-indigo-500 cursor-pointer transition"
-            >
-              {currentTrack.artist}
-            </p>
-          </div>
-          <button
-            onClick={() => toggleLike(currentTrack)}
-            className="p-1 transition text-neutral-400 hover:text-rose-500 active:scale-90"
-          >
-            <Heart size={15} className={isLiked ? 'fill-rose-500 text-rose-500' : ''} />
-          </button>
-        </div>
+      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[95%] lg:w-[calc(100%-320px)] lg:ml-32 max-w-5xl z-50 pointer-events-none select-none">
+        <div className="bg-[#1F1F23]/90 backdrop-blur-[40px] border border-white/10 rounded-[24px] shadow-[0_20px_50px_rgba(0,0,0,0.6)] p-3 px-6 flex items-center justify-between gap-6 pointer-events-auto relative overflow-hidden">
+          
+          {/* Top reflection highlight */}
+          <div className="absolute inset-x-0 top-0 h-[1px] bg-white/20 pointer-events-none" />
 
-        {/* Center: Minimal Scrubber */}
-        <div className="flex flex-col items-center w-2/4 px-3">
-          <div className="flex items-center space-x-4 mb-0.5">
-            <button
-              onClick={() => setIsShuffle(!isShuffle)}
-              className={`transition hover:scale-110 ${isShuffle ? 'text-indigo-500 font-bold' : 'text-neutral-400 hover:text-neutral-200'}`}
-              title="Shuffle"
-            >
-              <Shuffle size={13} />
-            </button>
-
-            <button
-              onClick={handlePrevious}
-              className="text-neutral-400 hover:text-white transition active:scale-95"
-              title="Previous"
-            >
-              <SkipBack size={15} />
-            </button>
-
-            <button
-              onClick={togglePlay}
-              className="w-8 h-8 rounded-full bg-indigo-600 text-white flex items-center justify-center font-bold shadow-md hover:bg-indigo-500 hover:scale-105 active:scale-95 transition"
-            >
-              {isPlaying ? <Pause size={14} /> : <Play size={14} className="translate-x-0.5 fill-white" />}
-            </button>
-
-            <button
-              onClick={handleNext}
-              className="text-neutral-400 hover:text-white transition active:scale-95"
-              title="Next"
-            >
-              <SkipForward size={15} />
-            </button>
-
-            <button
-              onClick={cycleRepeat}
-              className={`transition hover:scale-110 relative ${repeatMode !== 'off' ? 'text-indigo-500 font-bold' : 'text-neutral-400 hover:text-neutral-200'}`}
-              title={`Repeat: ${repeatMode}`}
-            >
-              {repeatMode === 'one' ? <Repeat1 size={13} /> : <Repeat size={13} />}
-            </button>
-          </div>
-
-          <div className="w-full flex items-center space-x-2">
-            <span className="text-[9px] font-mono text-neutral-400 w-7 text-right">{formatTime(currentTime)}</span>
-            <div className="flex-1">
-              <WaveformScrubber />
-            </div>
-            <span className="text-[9px] font-mono text-neutral-400 w-7">{formatTime(duration)}</span>
-          </div>
-        </div>
-
-        {/* Right: Actions */}
-        <div className="flex items-center justify-end space-x-1.5 w-1/4">
-          <button
-            onClick={() => setIs2GMode(!is2GMode)}
-            className={`px-2 py-0.5 rounded-full text-[9px] font-mono font-medium border flex items-center gap-0.5 transition ${
-              is2GMode
-                ? 'border-emerald-500/40 text-emerald-500 bg-emerald-500/10'
-                : 'border-white/10 text-neutral-400'
-            }`}
-            title="Toggle 2G Mode"
-          >
-            <Zap size={10} className={is2GMode ? 'animate-pulse' : ''} />
-            <span>2G</span>
-          </button>
-
-          <button
-            onClick={() => setIsModalOpen(true)}
-            className="p-1.5 text-neutral-400 hover:text-indigo-500 transition"
-            title="Lyrics"
-          >
-            <Mic2 size={14} />
-          </button>
-
-          <button
-            onClick={() => setIsQueueOpen(true)}
-            className="p-1.5 text-neutral-400 hover:text-indigo-500 transition"
-            title="Queue"
-          >
-            <ListMusic size={14} />
-          </button>
-
-          <button
-            onClick={() => setIsSettingsOpen(true)}
-            className="p-1.5 text-neutral-400 hover:text-indigo-500 transition"
-            title="Settings"
-          >
-            <Settings size={14} />
-          </button>
-
-          <div className="hidden lg:flex items-center space-x-1.5 pl-1">
-            <button onClick={toggleMute} className="text-neutral-400 hover:text-indigo-500 transition">
-              {isMuted || volume === 0 ? <VolumeX size={14} /> : <Volume2 size={14} />}
-            </button>
-            <input
-              type="range"
-              min="0"
-              max="100"
-              value={isMuted ? 0 : volume}
-              onChange={(e) => changeVolume(e.target.value)}
-              className="w-12 h-1 bg-neutral-300 dark:bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+          {/* 1. Left: Track Info */}
+          <div className="flex items-center gap-3.5 w-1/4 min-w-[180px]">
+            <img
+              src={currentTrack.thumbnail}
+              alt={currentTrack.title}
+              className="w-12 h-12 rounded-xl object-cover shadow-md border border-white/10 shrink-0"
             />
+            <div className="flex flex-col truncate">
+              <h4 className="text-sm font-semibold text-white truncate cursor-default">
+                {currentTrack.title}
+              </h4>
+              <p
+                onClick={() => setSelectedArtist && setSelectedArtist(currentTrack.artist)}
+                className="text-xs text-white/50 truncate hover:text-[#00F2FE] cursor-pointer transition mt-0.5"
+              >
+                {currentTrack.artist}
+              </p>
+            </div>
+            <button
+              onClick={() => toggleLike(currentTrack)}
+              className="ml-2 text-white/60 hover:text-[#FF007F] transition-colors shrink-0 p-1"
+            >
+              <Heart size={18} className={isLiked ? 'fill-[#FF007F] text-[#FF007F]' : ''} />
+            </button>
+          </div>
+
+          {/* 2. Center: Controls & Scrubber */}
+          <div className="flex-1 flex flex-col items-center max-w-xl mx-auto">
+            <div className="flex items-center gap-6 mb-1">
+              <button
+                onClick={() => setIsShuffle(!isShuffle)}
+                className={`transition hover:scale-110 p-1 ${isShuffle ? 'text-[#00F2FE]' : 'text-white/60 hover:text-white'}`}
+                title="Shuffle"
+              >
+                <Shuffle size={14} />
+              </button>
+
+              <button
+                onClick={handlePrevious}
+                className="text-white/80 hover:text-white transition active:scale-95 p-1"
+                title="Previous"
+              >
+                <SkipBack size={18} className="fill-current" />
+              </button>
+
+              <button
+                onClick={togglePlay}
+                className="w-10 h-10 rounded-full bg-white text-black flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-[0_0_15px_rgba(255,255,255,0.4)]"
+              >
+                {isPlaying ? <Pause size={18} className="fill-current" /> : <Play size={18} className="translate-x-0.5 fill-current" />}
+              </button>
+
+              <button
+                onClick={handleNext}
+                className="text-white/80 hover:text-white transition active:scale-95 p-1"
+                title="Next"
+              >
+                <SkipForward size={18} className="fill-current" />
+              </button>
+
+              <button
+                onClick={cycleRepeat}
+                className={`transition hover:scale-110 relative p-1 ${repeatMode !== 'off' ? 'text-[#00F2FE]' : 'text-white/60 hover:text-white'}`}
+                title={`Repeat: ${repeatMode}`}
+              >
+                {repeatMode === 'one' ? <Repeat1 size={14} /> : <Repeat size={14} />}
+              </button>
+            </div>
+
+            <div className="w-full flex items-center gap-3 text-xs text-white/50 font-mono">
+              <span className="w-8 text-right">{formatTime(currentTime)}</span>
+              <div className="flex-1">
+                <WaveformScrubber />
+              </div>
+              <span className="w-8">{formatTime(duration)}</span>
+            </div>
+          </div>
+
+          {/* 3. Right: Actions (2G & Settings removed, only Lyrics, Queue, Cast & Volume) */}
+          <div className="w-1/4 flex items-center justify-end gap-3.5 text-white/70">
+            <button
+              onClick={() => setIsModalOpen(true)}
+              className="hover:text-white transition p-1"
+              title="Lyrics"
+            >
+              <Mic2 size={16} />
+            </button>
+
+            <button
+              onClick={() => setIsQueueOpen(true)}
+              className="hover:text-white transition p-1"
+              title="Queue"
+            >
+              <ListMusic size={16} />
+            </button>
+
+            <button
+              className="hover:text-white transition p-1"
+              title="Cast / Devices"
+            >
+              <Cast size={16} />
+            </button>
+
+            <div className="hidden lg:flex items-center gap-2 w-24">
+              <button onClick={toggleMute} className="text-white/50 hover:text-white transition">
+                {isMuted || volume === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}
+              </button>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                value={isMuted ? 0 : volume}
+                onChange={(e) => changeVolume(e.target.value)}
+                className="w-full h-1 bg-white/10 rounded-full appearance-none cursor-pointer accent-white"
+              />
+            </div>
           </div>
         </div>
       </div>
 
+      {/* Global Overlays */}
       <LyricsView />
       <QueueDrawer />
       <SettingsModal />
