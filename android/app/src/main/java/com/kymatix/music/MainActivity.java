@@ -1,5 +1,7 @@
 package com.kymatix.music;
 
+import android.content.Intent;
+import android.os.Build;
 import android.os.Bundle;
 import android.webkit.WebSettings;
 import com.getcapacitor.BridgeActivity;
@@ -9,6 +11,14 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // [নতুন] অ্যাপ চালু হওয়ার সাথে সাথে মিউজিক ফোরগ্রাউন্ড সার্ভিসটি স্টার্ট করে দেওয়া হচ্ছে
+        Intent serviceIntent = new Intent(this, MediaForegroundService.class);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent);
+        } else {
+            startService(serviceIntent);
+        }
 
         // ১. WebView-কে অডিও অটো-প্লে করার পূর্ণ পারমিশন দেওয়া
         if (this.getBridge() != null && this.getBridge().getWebView() != null) {

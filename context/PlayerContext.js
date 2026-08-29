@@ -203,37 +203,6 @@ export function PlayerProvider({ children }) {
     }
   }, []);
 
-  // 4. THE MAGIC: Background Mode Setup (স্ক্রিন অফ হলেও গান চলবে)
-  useEffect(() => {
-    const setupBackgroundMode = () => {
-      if (window.cordova && window.cordova.plugins && window.cordova.plugins.backgroundMode) {
-        const bgMode = window.cordova.plugins.backgroundMode;
-        bgMode.enable();
-        
-        bgMode.setDefaults({
-          title: 'KYMATIX Studio',
-          text: 'Playing music in background...',
-          hidden: true,
-          silent: true
-        });
-
-        // ফোন লক হলে বা অ্যাপ মিনিমাইজ হলে WebView-কে পজ হতে বাধা দেবে
-        bgMode.on('activate', () => {
-          bgMode.disableWebViewOptimizations();
-        });
-      }
-    };
-
-    if (typeof window !== 'undefined') {
-      document.addEventListener('deviceready', setupBackgroundMode, false);
-    }
-    return () => {
-      if (typeof window !== 'undefined') {
-        document.removeEventListener('deviceready', setupBackgroundMode, false);
-      }
-    };
-  }, []);
-
   const populateAutoQueue = async (seedTrack, context = {}) => {
     try {
       if (context.isPlaylist && Array.isArray(context.trackList)) {
