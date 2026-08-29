@@ -268,6 +268,11 @@ export function PlayerProvider({ children }) {
     saveState('kymatix_last_track', track);
     saveState('kymatix_playback_time', 0);
 
+    // [NEW]: Android Native Bridge-এ গানের নাম ও আর্টিস্ট পাঠিয়ে নোটিফিকেশন আপডেট করা
+    if (typeof window !== 'undefined' && window.AndroidBridge && window.AndroidBridge.updateTrackMeta) {
+      window.AndroidBridge.updateTrackMeta(track.title || 'KYMATIX Track', track.artist || 'KYMATIX Studio');
+    }
+
     setPlaybackContext({
       type: context.isPlaylist ? 'playlist' : context.isArtistPage ? 'artist' : 'feed',
       sourceId: context.playlistId || null,
@@ -469,6 +474,22 @@ export function PlayerProvider({ children }) {
     setPlaylists(updated);
     saveState('kymatix_playlists', updated);
   };
+
+  // [NEW FEATURE]: Native Android Bridge
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.kymatixNativeControl = (action) => {
+        if (action === 'play' || action === 'pause') togglePlay();
+        else if (action === 'next') handleNext();
+        else if (action === 'prev') handlePrevious();
+      };
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        delete window.kymatixNativeControl;
+      }
+    };
+  });
 
   useEffect(() => {
     if (isPlaying) {
