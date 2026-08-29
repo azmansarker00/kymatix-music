@@ -21,7 +21,6 @@ public class MediaForegroundService extends Service implements AudioManager.OnAu
     private AudioManager audioManager;
     private AudioFocusRequest audioFocusRequest;
 
-    // হেডফোন আনপ্লাগ ডিটেকশন রিসিভার
     private final BroadcastReceiver noisyReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -46,11 +45,11 @@ public class MediaForegroundService extends Service implements AudioManager.OnAu
         String artist = "Playing Music";
 
         if (intent != null) {
-            if (intent.hasExtra("track_title")) {
-                title = intent.getStringExtra("track_title");
+            if (intent.hasExtra("TITLE")) {
+                title = intent.getStringExtra("TITLE");
             }
-            if (intent.hasExtra("track_artist")) {
-                artist = intent.getStringExtra("track_artist");
+            if (intent.hasExtra("ARTIST")) {
+                artist = intent.getStringExtra("ARTIST");
             }
         }
 

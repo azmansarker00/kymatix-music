@@ -268,9 +268,9 @@ export function PlayerProvider({ children }) {
     saveState('kymatix_last_track', track);
     saveState('kymatix_playback_time', 0);
 
-    // [NEW]: Android Native Bridge-এ গানের নাম ও আর্টিস্ট পাঠিয়ে নোটিফিকেশন আপডেট করা
-    if (typeof window !== 'undefined' && window.AndroidBridge && window.AndroidBridge.updateTrackMeta) {
-      window.AndroidBridge.updateTrackMeta(track.title || 'KYMATIX Track', track.artist || 'KYMATIX Studio');
+    // [FIXED]: সঠিক জাভাস্ক্রিপ্ট ইন্টারফেস নাম দিয়ে নোটিফিকেশন আপডেট করা
+    if (typeof window !== 'undefined' && window.KymatixAndroid && window.KymatixAndroid.updateTrackInfo) {
+      window.KymatixAndroid.updateTrackInfo(track.title || 'KYMATIX Track', track.artist || 'KYMATIX Studio');
     }
 
     setPlaybackContext({
