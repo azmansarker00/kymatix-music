@@ -256,7 +256,6 @@ export function PlayerProvider({ children }) {
   const playTrack = (track, context = {}) => {
     if (!track?.videoId) return;
 
-    // সাইলেন্ট অডিও চালিয়ে সিস্টেমকে জাগ্রত রাখা
     if (keepAliveAudio.current) {
       keepAliveAudio.current.play().catch(() => {});
     }
@@ -268,7 +267,7 @@ export function PlayerProvider({ children }) {
     saveState('kymatix_last_track', track);
     saveState('kymatix_playback_time', 0);
 
-    // [FIXED]: সঠিক জাভাস্ক্রিপ্ট ইন্টারফেস নাম দিয়ে নোটিফিকেশন আপডেট করা
+    // Update Android Native Notification Metadata
     if (typeof window !== 'undefined' && window.KymatixAndroid && window.KymatixAndroid.updateTrackInfo) {
       window.KymatixAndroid.updateTrackInfo(track.title || 'KYMATIX Track', track.artist || 'KYMATIX Studio');
     }
@@ -475,7 +474,7 @@ export function PlayerProvider({ children }) {
     saveState('kymatix_playlists', updated);
   };
 
-  // [NEW FEATURE]: Native Android Bridge
+  // [NATIVE BRIDGE]: Native Android Controls Listener
   useEffect(() => {
     if (typeof window !== 'undefined') {
       window.kymatixNativeControl = (action) => {
