@@ -63,7 +63,7 @@ export function PlayerProvider({ children }) {
     return loadedHistory.filter((item) => now - (item.playedAt || now) <= maxAge);
   };
 
-  // ১. Restore Persistent Session on Initial Load & Initialize Keep-Alive Audio
+  // ১. Restore Persistent Session on Initial Load
   useEffect(() => {
     try {
       if (typeof window !== 'undefined') {
@@ -123,14 +123,12 @@ export function PlayerProvider({ children }) {
     } catch {}
   }, []);
 
-  // Save Playback Time State Periodically
   useEffect(() => {
     if (currentTime > 0 && currentTrack) {
       saveState('kymatix_playback_time', currentTime);
     }
   }, [currentTime, currentTrack]);
 
-  // 2. Dynamic Tab Title Update Engine
   useEffect(() => {
     if (typeof document === 'undefined') return;
     if (currentTrack && isPlaying) {
@@ -165,7 +163,7 @@ export function PlayerProvider({ children }) {
     saveState('kymatix_history', []);
   };
 
-  // 3. Background Playback & MediaSession API
+  // 2. MediaSession API (লকস্ক্রিন কন্ট্রোল)
   useEffect(() => {
     if (!currentTrack || typeof window === 'undefined' || !('mediaSession' in navigator)) return;
 
@@ -176,8 +174,6 @@ export function PlayerProvider({ children }) {
         album: currentTrack.album || 'KYMATIX Stream',
         artwork: [
           { src: currentTrack.thumbnail || currentTrack.cover || '', sizes: '96x96', type: 'image/jpeg' },
-          { src: currentTrack.thumbnail || currentTrack.cover || '', sizes: '128x128', type: 'image/jpeg' },
-          { src: currentTrack.thumbnail || currentTrack.cover || '', sizes: '256x256', type: 'image/jpeg' },
           { src: currentTrack.thumbnail || currentTrack.cover || '', sizes: '512x512', type: 'image/jpeg' },
         ]
       });
@@ -189,14 +185,6 @@ export function PlayerProvider({ children }) {
       navigator.mediaSession.setActionHandler('seekto', (details) => {
         if (details.seekTime !== undefined) seek(details.seekTime);
       });
-      navigator.mediaSession.setActionHandler('seekbackward', (details) => {
-        const skip = details.seekOffset || 10;
-        seek(Math.max(currentTime - skip, 0));
-      });
-      navigator.mediaSession.setActionHandler('seekforward', (details) => {
-        const skip = details.seekOffset || 10;
-        seek(Math.min(currentTime + skip, duration || 240));
-      });
     } catch {}
   }, [currentTrack, duration, currentTime]);
 
@@ -206,13 +194,44 @@ export function PlayerProvider({ children }) {
     }
   }, [isPlaying]);
 
-  // 4. YouTube Hidden Engine Loader
+  // 3. YouTube Hidden Engine Loader
   useEffect(() => {
     if (!window.YT) {
       const tag = document.createElement('script');
       tag.src = 'https://www.youtube.com/iframe_api';
       document.body.appendChild(tag);
     }
+  }, []);
+
+  // 4. THE MAGIC: Background Mode Setup (স্ক্রিন অফ হলেও গান চলবে)
+  useEffect(() => {
+    const setupBackgroundMode = () => {
+      if (window.cordova && window.cordova.plugins && window.cordova.plugins.backgroundMode) {
+        const bgMode = window.cordova.plugins.backgroundMode;
+        bgMode.enable();
+        
+        bgMode.setDefaults({
+          title: 'KYMATIX Studio',
+          text: 'Playing music in background...',
+          hidden: true,
+          silent: true
+        });
+
+        // ফোন লক হলে বা অ্যাপ মিনিমাইজ হলে WebView-কে পজ হতে বাধা দেবে
+        bgMode.on('activate', () => {
+          bgMode.disableWebViewOptimizations();
+        });
+      }
+    };
+
+    if (typeof window !== 'undefined') {
+      document.addEventListener('deviceready', setupBackgroundMode, false);
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        document.removeEventListener('deviceready', setupBackgroundMode, false);
+      }
+    };
   }, []);
 
   const populateAutoQueue = async (seedTrack, context = {}) => {
@@ -268,6 +287,7 @@ export function PlayerProvider({ children }) {
   const playTrack = (track, context = {}) => {
     if (!track?.videoId) return;
 
+    // সাইলেন্ট অডিও চালিয়ে সিস্টেমকে জাগ্রত রাখা
     if (keepAliveAudio.current) {
       keepAliveAudio.current.play().catch(() => {});
     }
